@@ -32,9 +32,9 @@ const (
   DEL_1Y  = 4
 )
 
-//func (cfg * CC) Client() {
-//  
-//}
+func (cfg * CC) Client() * compute.MachineImagesClient {
+  return cfg.c
+}
 // Cons: time.ParseDuration("10s") from https://go.dev/blog/package-names
 func (cfg * CC) Init() int {
   ctx := context.Background()
@@ -51,7 +51,7 @@ func (cfg * CC) Init() int {
   return 0
 }
 
-func Classify(mi * computepb.MachineImage, cfg * CC) int {
+func (cfg * CC) Classify(mi * computepb.MachineImage) int {
   t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.tloc) // Def. UTC
   nd := cfg.tnow.Sub(t) // Duration
   if err != nil { return KEEP_SAFE; }
@@ -68,7 +68,7 @@ func Classify(mi * computepb.MachineImage, cfg * CC) int {
 }
 
 // To delete .. based on class.
-func To_be_deleted(cl int) bool {
+func ToBeDeleted(cl int) bool {
   if (cl >= DEL_1W) || (cl <= DEL_1Y) { return true }
   return false
 }
