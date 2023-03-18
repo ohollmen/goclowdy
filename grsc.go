@@ -66,18 +66,8 @@ func vm_ls(pname string) {
 }
 func mi_ls(pname string) {
   ctx := context.Background()
-  // CredF: "~/gcpServiceAccountKey.json",
   mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  TZn: "Europe/London"} // tnow: tnow, tloc: loc
   mic.Init()
-  /*
-  c, err := compute.NewMachineImagesRESTClient(ctx)  // , option.WithCredentialsFile(cfg.CredF)
-  if err != nil {
-    // NOT:fmt.Println("Error creating client "+err.msg)
-    fmt.Println(err)
-    //log.Fatal(err)
-    return
-  }
-  */
   var maxr uint32 = 20
   if mic.Project == "" { fmt.Println("No Project passed"); return }
   req := &computepb.ListMachineImagesRequest{
