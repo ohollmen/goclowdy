@@ -1,6 +1,6 @@
 # GoClowdy
 
-Access and automate chores related to VM and Machine Images.
+Access and automate chores related to VMs and Machine Images.
 
 goclowdy provides easy-to-use Go wrappers for accessing the inventory of VM:s
 and VM Machine images with a very terse and compact wrapper code for the
