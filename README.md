@@ -73,5 +73,5 @@ Executable grsc currently supports 2 subcommands:
 # TODO
 
 - Enahance documentation, the config options of modules/ CLI utils.
-- Add subcomands / use cases to CLI utility
+- Add subcommands / use cases to CLI utility
 

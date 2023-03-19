@@ -64,14 +64,15 @@ func MyTask(ctx context.Context, m PubSubMessage) error {
 
 ## Access to "FS-like" data
 
-Despite the statelessness of Cloud function and most function deployments doing all processing "in memory" (wihout need to access static files, configs, etc.),
-it seems that GCP facilitates the original source code directory as minimal read-only "filesystem area" to cloud function (available as subdirectory `./serverless_function_source_code`).
+Despite the statelessness of Cloud function and most function deployments doing all processing "in memory" (without need to access static files, configs, etc.),
+it seems that GCP facilitates the original source code directory as minimal read-only "filesystem area" to cloud function
+(available as subdirectory `./serverless_function_source_code`).
 See Document "Cloud Functions execution environment" => Section "Memory and file system" (URL in Refs) for more info.
 
 ## Package for cloud function
 
 - Cannot be main
-- Since (files in) one dir can handle only one (package) namespace, the possible CLI utils (or tests ?) budled onto same project must be in different (sub)dir
+- Since (files in) one dir can handle only one (package) namespace, the possible CLI utils (or tests ?) bundled onto same project must be in different (sub)dir
 - Either:
   - Place CF to topdir, other(s), e.g. CLI util to subdir(s)
   - Place CLI util to topdir, CF to subdir ... for no namespace clashes
@@ -101,9 +102,18 @@ ctx := context.Background()
 client, err := pubsub.NewClient(ctx, projID, opts...)
 // ... OR with ClientConfig
 client, err := pubsub.NewClientWithConfig(ctx, projID, config, opts...)
-// Note: type Message = ipubsub.Message, where: ipubsub "cloud.google.com/go/internal/pubsub" (https://github.com/googleapis/google-cloud-go/blob/pubsub/v1.29.0/pubsub/message.go#L44)
+// Note: type Message = ipubsub.Message, where: ipubsub "cloud.google.com/go/internal/pubsub"
+// (https://github.com/googleapis/google-cloud-go/blob/pubsub/v1.29.0/pubsub/message.go#L44)
 // Data, Attributes, ID, PublishTime,DeliveryAttempt, OrderingKey (ack has: receiveTime,doneFunc,ackResult)
 res := topic.Publish(ctx, &pubsub.Message{Data: []byte("Hello!")})
+```
+## Deploying Cloud functions
+
+```
+# Use either --trigger-topic $TOPIC OR --trigger-http
+gcloud functions deploy $CFUNCNAME --quiet --memory 256MB --project $GCP_PROJECT --region $REGION --entry-point $(EPFUNC1) \
+  --runtime go116 --timeout 540 --trigger-http --source . --set-env-vars=GCP_PROJECT=myproject
+# For more info see gcloud functions deploy --help
 ```
 
 ## References
