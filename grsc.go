@@ -18,6 +18,8 @@ import (
   "goclowdy/mi"
   //"goclowdy/VMs"
   //"goclowdy/MIs"
+  "google.golang.org/api/iam/v1"
+  "path" // Base
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP Recent (<1W)", "KEEP (one-per-week)", "DELETE (>1W)", "DELETE (> 1Y)"}
@@ -33,6 +35,24 @@ func main() {
     vm_ls(pname)
   } else if os.Args[1] == "milist" {
     mi_ls(pname)
+  } else if os.Args[1] == "keylist" {
+    ctx := context.Background()
+    iamService, err := iam.NewService(ctx)
+    if err != nil { fmt.Println("No Service"); return }
+    acct := os.Getenv("GCP_SA")
+    pname := os.Getenv("GCP_SA_PROJECT")
+    if acct == "" { fmt.Println("No GCP_SA"); return }
+    if pname == "" { fmt.Println("No GCP_SA_PROJECT"); return }
+    sapath := fmt.Sprintf( "projects/%s/serviceAccounts/%s", pname,  acct)
+    resp, err := iamService.Projects.ServiceAccounts.Keys.List(sapath).Context(ctx).Do()
+    if err != nil { fmt.Println("No Keys %v", err); return }
+    //fmt.Println("Got:", resp) // iam.ListServiceAccountKeysResponse
+    fmt.Printf("%T\n", resp) // import "reflect" fmt.Println(reflect.TypeOf(tst))
+    for _, key := range resp.Keys {
+      fmt.Printf("%T\n", key) // iam.ServiceAccountKey
+      fmt.Printf("%v Exp.: %s\n", path.Base(key.Name), key.ValidBeforeTime)
+    }
+    // Also: SignJwtRequest, but: https://cloud.google.com/iam/docs/migrating-to-credentials-api
   } else { fmt.Println("Pass one of subcommands: vmlist,milist"); return }
   return
 }
