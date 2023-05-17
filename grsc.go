@@ -1,11 +1,14 @@
 package main
+
+// go.formatOnSave
+// editor.formatOnSave
 // go build grsc.go
 import (
-  "fmt"
   "context"
-  "os" // Args
-  "google.golang.org/api/iterator"
-  compute "cloud.google.com/go/compute/apiv1"
+  "fmt"
+  "os" // Args  
+  "google.golang.org/api/iterator"  
+  //compute "cloud.google.com/go/compute/apiv1" // Used only in lower levels
   computepb "cloud.google.com/go/compute/apiv1/computepb"
   //goc "VMs"
   //macv "MIs"
@@ -14,27 +17,27 @@ import (
   //"github.com/ohollmen/goclowdy"
   //"goclowdy/vm/VMs"
   //"goclowdy/mi/MIs"
-  "goclowdy/vm"
-  "goclowdy/mi"
+  MIs "goclowdy/mi"
+  VMs "goclowdy/vm" 
   //"goclowdy/VMs"
   //"goclowdy/MIs"
+  "path" // Base  
   "google.golang.org/api/iam/v1"
-  "path" // Base
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP Recent (<1W)", "KEEP (one-per-week)", "DELETE (>1W)", "DELETE (> 1Y)"}
 
 func main() {
   //ctx := context.Background()
-  if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: vmlist,milist"); return }
+  if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: vmlist,midel"); return }
   //if () {}
   pname := os.Getenv("GCP_PROJECT")
   if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
   if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
   if os.Args[1] == "vmlist" {
     vm_ls(pname)
-  } else if os.Args[1] == "milist" {
-    mi_ls(pname)
+  } else if os.Args[1] == "midel" {
+    mi_del(pname)
   } else if os.Args[1] == "keylist" {
     ctx := context.Background()
     iamService, err := iam.NewService(ctx)
@@ -53,12 +56,12 @@ func main() {
       fmt.Printf("%v Exp.: %s\n", path.Base(key.Name), key.ValidBeforeTime)
     }
     // Also: SignJwtRequest, but: https://cloud.google.com/iam/docs/migrating-to-credentials-api
-  } else { fmt.Println("Pass one of subcommands: vmlist,milist"); return }
+  } else { fmt.Println("Pass one of subcommands: vmlist,milist,keylist"); return }
   return
 }
 
 func vm_ls(pname string) {
-    ctx := context.Background()
+    //ctx := context.Background()
     // test overlapping sysm (old: vs)
     vmc := VMs.CC{Project: pname}
     vmc.Init()
@@ -67,27 +70,27 @@ func vm_ls(pname string) {
     icnt := len(all)
     if icnt == 0 { fmt.Println("No VMs found"); return }
     fmt.Printf("Got %v Initial Instances (Filtering ...)\n", icnt)
-    // Test MI overlaps
-    mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  TZn: "Europe/London"} // tnow: tnow, tloc: loc
+    // Test for daily MI. This is now embedded to mic.CreateFrom() logic.
+    mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  TZn: "Europe/London", Debug: true} // tnow: tnow, tloc: loc
     mic.Init()
-    c, err := compute.NewMachineImagesRESTClient(ctx)
-    if err != nil { return }
     for _, it := range all{ // Instance
       fmt.Println("vname:"+it.GetName())
       in := MIs.StdName(it.GetName())
       fmt.Println("STD Name:", in)
-      mi := mic.GetOne(in, c)
+      mi := mic.GetOne(in)
       if mi != nil  {
         fmt.Println("Found image: ", mi.GetName())
-        mic.Delete(mi, c)
+        //mic.Delete(mi)
       } else { fmt.Println("No (std) image found for : ", it.GetName()) }
     }
     return
 }
-func mi_ls(pname string) {
+func mi_del(pname string) {
   ctx := context.Background()
-  mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  TZn: "Europe/London"} // tnow: tnow, tloc: loc
+  midel := os.Getenv("MI_DELETE_EXEC")
+  mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
   mic.Init()
+  if midel != "" { mic.DelOK = true; }
   var maxr uint32 = 20
   if mic.Project == "" { fmt.Println("No Project passed"); return }
   req := &computepb.ListMachineImagesRequest{
@@ -105,7 +108,17 @@ func mi_ls(pname string) {
     var cl int = mic.Classify(mi)
     fmt.Println(verdict[cl])
     if MIs.ToBeDeleted(cl) {
-      //Delete(mi, c)
+      if mic.DelOK {
+
+        //err := mic.Delete(mi)
+        // if err != nil {
+        //  fmt.Printf("Error Deleting MI: %s.", mi.GetName())
+        //} else {
+        fmt.Printf("Deleted %s.", mi.GetName())
+        //}
+      } else {
+        fmt.Printf("Should have deleted %s. Set DelOK (MI_DELETE_EXEC) to actually delete.\n", mi.GetName())
+      }
     }
   }
 }
