@@ -31,10 +31,10 @@ type CC struct {
 
 const (
   KEEP_SAFE int = 0
-  KEEP_NEW = 1
-  KEEP_WD = 2
-  DEL_1W  = 3
-  DEL_1Y  = 4
+  KEEP_NEW = 1 // Newer than KeepMinH
+  KEEP_WD = 2 // In intermediate time, Matching WD_keep
+  DEL_1W  = 3 // In intermediate time, not WD_keep
+  DEL_OLD  = 4 // Older than KeepMaxH
 )
 
 func (cfg * CC) Client() * compute.MachineImagesClient {
@@ -55,16 +55,19 @@ func (cfg * CC) Init() int {
   if err != nil { return 1 }
   if cfg.StorLoc == "" { cfg.StorLoc = "us"; }
   //OLD: cfg.DelOK = false
+  // Good Defaults for KeepMinH, KeepMaxH
+  if cfg.KeepMinH < 1 { cfg.KeepMinH = 168; }
+  if cfg.KeepMaxH < 1 { cfg.KeepMaxH = (24 * (365 + 7)); }
   return 0
 }
 
 func (cfg * CC) Classify(mi * computepb.MachineImage) int {
   t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.tloc) // Def. UTC
-  nd := cfg.tnow.Sub(t) // Duration
+  nd := cfg.tnow.Sub(t) // Duration/Age
   if err != nil { return KEEP_SAFE; }
   hrs := nd.Hours()
-  // TODO: Use cfg.KeepMaxH
-  if hrs > (24 * (365 + 7)) { return DEL_1Y; } // fmt.Println("DEL ");
+  // NEW: Use cfg.KeepMaxH (OLD: (24 * (365 + 7)))
+  if hrs > float64(cfg.KeepMaxH) { return DEL_OLD; } // fmt.Println("DEL "); // Need float64() ?
   // Less than MAX period (e.g. 1Y+1W) old ... but
   // Test for always keep-period
   // float64
@@ -77,7 +80,7 @@ func (cfg * CC) Classify(mi * computepb.MachineImage) int {
 
 // To delete .. based on keep-classification.
 func ToBeDeleted(cl int) bool {
-  if (cl >= DEL_1W) || (cl <= DEL_1Y) { return true }
+  if (cl == DEL_1W) || (cl == DEL_OLD) { return true }
   return false
 }
 
@@ -85,8 +88,11 @@ func ToBeDeleted(cl int) bool {
 func (cfg * CC) Delete(mi * computepb.MachineImage) error { // , c * compute.MachineImagesClient
   ctx := context.Background()
   fmt.Println("Should delete "+ mi.GetName());
+  if ! cfg.DelOK { fmt.Printf("Not Deleting, DelOK=%v", cfg.DelOK); }
+  // Prepare request
   dreq := &computepb.DeleteMachineImageRequest{MachineImage: mi.GetName(), Project: cfg.Project} //RequestId
   //dreq.Reset()
+  // Call clinet (c) to *actually* delete
   op, err := cfg.c.Delete(ctx, dreq)
   if err != nil { fmt.Printf("Failed to delete MI: %s (%v) ", mi.GetName(), err); return err; }
   err = op.Wait(ctx)
@@ -129,6 +135,8 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { //
       Name: &imgname,
       SourceInstance: &instance_path,
       StorageLocations: storageLocation,
+      // TODO: nil or inst of...
+      // MachineImageEncryptionKey: &computepb.CustomerEncryptionKey{ KmsKeyName: &kkn, }, // Key name
     },
   }
   ctx := context.Background()
