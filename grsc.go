@@ -3,6 +3,10 @@
 // Abs.Age            KeepMaxH             KeepMinH         Now
 // <---------------------|--------------------|---------------|
 //  keep none/del all    |<-- keep 1/week  -->|  keep all     |
+// ## Building
+// ```
+// go build grsc.go
+// ```
 package main
 
 // go.formatOnSave
@@ -33,10 +37,10 @@ import (
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)"}
-
+var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME"}
 func main() {
   //ctx := context.Background()
-  if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: vmlist,midel,keylist"); return }
+  if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: vmlist,midel,keylist,env"); return }
   //if () {}
   pname := os.Getenv("GCP_PROJECT")
   if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
@@ -47,6 +51,11 @@ func main() {
     mi_del(pname)
   } else if os.Args[1] == "keylist" {
     key_list(pname)
+  } else if os.Args[1] == "env" {
+    fmt.Println("# The environment config:")
+    for _, evar := range envcfgkeys { 
+      fmt.Println("export "+ evar+ "="+ os.Getenv(evar)+ "") 
+  } 
   } else { fmt.Println("Pass one of subcommands: vmlist,milist,keylist"); return }
   return
 }
