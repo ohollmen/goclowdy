@@ -105,7 +105,8 @@ func mi_del(pname string) {
   //return
   // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
   mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
-  mic.Init()
+  rc := mic.Init()
+  if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
   if midel != "" { mic.DelOK = true; } // Non-empty => DELETE
   var maxr uint32 = 20
   if mic.Project == "" { fmt.Println("No Project passed"); return }
