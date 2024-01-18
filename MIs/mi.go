@@ -8,6 +8,7 @@ import (
   "fmt" // for name
   "context"
   //"strings" // ??
+  "regexp"
 )
 // Machine Image Client Config
 type CC struct {
@@ -26,6 +27,7 @@ type CC struct {
   c * compute.MachineImagesClient
   DelOK bool
   Debug bool
+  NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
 }
 
 
@@ -35,6 +37,7 @@ const (
   KEEP_WD = 2 // In intermediate time, Matching WD_keep
   DEL_1W  = 3 // In intermediate time, not WD_keep
   DEL_OLD  = 4 // Older than KeepMaxH
+  KEEP_CUSTOM = 5 // Custom named MI
 )
 
 func (cfg * CC) Client() * compute.MachineImagesClient {
@@ -52,12 +55,17 @@ func (cfg * CC) Init() int {
   // Init client ?
   var err error
   cfg.c, err = compute.NewMachineImagesRESTClient(ctx)
-  if err != nil { return 1 }
+  if err != nil { fmt.Println("Failed to init GCP MI Rest Client", err); return 1 }
   if cfg.StorLoc == "" { cfg.StorLoc = "us"; }
   //OLD: cfg.DelOK = false
   // Good Defaults for KeepMinH, KeepMaxH
   if cfg.KeepMinH < 1 { cfg.KeepMinH = 168; }
   if cfg.KeepMaxH < 1 { cfg.KeepMaxH = (24 * (365 + 7)); }
+  // Naming
+  if (os.Getenv("MI_STDNAME") != "") {
+    cfg.NameRE, err = regexp.Compile(os.Getenv("MI_STDNAME")) // (*Regexp, error) // Also MustCompile
+    if err != nil { fmt.Println("Cannot compile STD name RegExp"); return 1 }
+  }
   return 0
 }
 
@@ -66,6 +74,8 @@ func (cfg * CC) Classify(mi * computepb.MachineImage) int {
   nd := cfg.tnow.Sub(t) // Duration/Age
   if err != nil { return KEEP_SAFE; }
   hrs := nd.Hours()
+  // NEW: Non-std Naming
+  if (cfg.NameRE != nil) && (!cfg.NameRE.MatchString( mi.GetName() )) { return KEEP_CUSTOM; }
   // NEW: Use cfg.KeepMaxH (OLD: (24 * (365 + 7)))
   if hrs > float64(cfg.KeepMaxH) { return DEL_OLD; } // fmt.Println("DEL "); // Need float64() ?
   // Less than MAX period (e.g. 1Y+1W) old ... but
@@ -84,20 +94,24 @@ func ToBeDeleted(cl int) bool {
   return false
 }
 
-// 
-func (cfg * CC) Delete(mi * computepb.MachineImage) error { // , c * compute.MachineImagesClient
+// Old sign: mi * computepb.MachineImage
+// Alt way:
+// delimg := computeService.MachineImages.Delete(projid, miname)
+// _, err := delimg.Do()
+//func (cfg * CC) Delete(mi * computepb.MachineImage) error { // , c * compute.MachineImagesClient
+func (cfg * CC) Delete(miname string) error {
   ctx := context.Background()
-  fmt.Println("Should delete "+ mi.GetName());
-  if ! cfg.DelOK { fmt.Printf("Not Deleting, DelOK=%v", cfg.DelOK); }
+  fmt.Println("Should delete "+ miname); // mi.GetName()
+  if ! cfg.DelOK { fmt.Printf("Not Deleting, DelOK=%v", cfg.DelOK); return nil; } // return was not there
   // Prepare request
-  dreq := &computepb.DeleteMachineImageRequest{MachineImage: mi.GetName(), Project: cfg.Project} //RequestId
+  dreq := &computepb.DeleteMachineImageRequest{MachineImage: miname, Project: cfg.Project} //RequestId  mi.GetName()
   //dreq.Reset()
   // Call clinet (c) to *actually* delete
   op, err := cfg.c.Delete(ctx, dreq)
-  if err != nil { fmt.Printf("Failed to delete MI: %s (%v) ", mi.GetName(), err); return err; }
+  if err != nil { fmt.Printf("Failed to delete MI: %s (%v) ", miname, err); return err; } // mi.GetName()
   err = op.Wait(ctx)
-  if err != nil { fmt.Println("Error waiting for MI Deletion of ", mi.GetName()); return err; }
-  fmt.Println("Success deleting MI: ", mi.GetName())
+  if err != nil { fmt.Println("Error waiting for MI Deletion of ", miname); return err; } // mi.GetName()
+  fmt.Println("Success deleting MI: ", miname) // mi.GetName()
   return nil
 }
 
@@ -119,7 +133,7 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { //
     // Skip (What to return)
     if cfg.DelOK == false { fmt.Println("Skipping MI creation becase MI exists and no Forcing is on."); return nil; }
     // or Delete (on DelOK/force)
-    err := cfg.Delete(mi)
+    err := cfg.Delete(mi.GetName())
     if err != nil { fmt.Printf("Tried deleting MI with overlapping name (%s), but failed: %v\n", imgname, err); return err; }
   }
   //NONEED:instance_path := cfg.instpath(inst) // pass: Instance
