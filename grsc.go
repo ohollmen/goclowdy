@@ -109,7 +109,7 @@ func vm_ls(pname string) {
     return
 }
 
-// Delet machine images per given config policy
+// Delete machine images per given config policy
 func mi_del(pname string) {
   ctx := context.Background()
   midel := os.Getenv("MI_DELETE_EXEC")
@@ -129,6 +129,7 @@ func mi_del(pname string) {
   //return
   // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
   mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
+  // err := json.Unmarshal(Data, &mic)
   rc := mic.Init()
   if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
   if midel != "" { mic.DelOK = true; } // Non-empty => DELETE
@@ -181,6 +182,10 @@ func mi_del(pname string) {
       rc := mic_delete_mi(&mic, mi.miname);
       if rc != 0 { }
     }
+    return
+    //sasize := 30
+    //chunks := chunk(delarr, sasize )
+    
   }
 }
 

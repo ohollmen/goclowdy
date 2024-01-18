@@ -4,9 +4,11 @@ import (
   "sync"
   //"exec" // Old ? Also: "os/exec" https://stackoverflow.com/questions/6182369/exec-a-shell-command-in-go
   "os/exec"
+  MIs "github.com/ohollmen/goclowdy/MIs"
 )
 var names2 = []string{"bu1","bu2","bu3","bu4","bu5","bu6","bu7","bu8","bu9","bu10","bu11","bu12","bu13","bu14","bu15","bu16",};
 
+// TODO: Generics: replace string w. 
 func chunk(items []string, sasize int) [][]string {
   var chunks [][]string
   alen := len(items)
@@ -44,4 +46,11 @@ func hello(str string, wg *sync.WaitGroup) error {
   fmt.Printf("Cmd output: %s\n", stdout);
   //exec: cmd.Close()
   return nil
+}
+
+func delete_wg(mic * MIs.CC, mimi * MIMI, wg *sync.WaitGroup) error {
+  defer wg.Done()
+  err := mic.Delete(mimi.miname);
+  if err != nil { fmt.Printf("Error: Failed deleting MI '%s' during parallel processing !\n", mimi.miname); return err; }
+  return nil;
 }
