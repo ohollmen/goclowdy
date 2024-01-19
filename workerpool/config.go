@@ -7,7 +7,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
     return &Config{
-        WorkerLimit: 25,
-        WorkerTimeoutSeconds: 25,
+        WorkerLimit: 100,
+        WorkerTimeoutSeconds: 0,
     }
 }

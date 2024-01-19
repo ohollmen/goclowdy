@@ -1,16 +1,19 @@
 package MIs
 
 import (
-  compute "cloud.google.com/go/compute/apiv1"
-  computepb "cloud.google.com/go/compute/apiv1/computepb"
-  "time"
-  "os"
-  "fmt" // for name
-  "context"
-  //"strings" // ??
-  "regexp"
-  "strconv" // Atoi()
+	"context"
+	"fmt" // for name
+	"os"
+	"time"
+
+	compute "cloud.google.com/go/compute/apiv1"
+	computepb "cloud.google.com/go/compute/apiv1/computepb"
+
+	//"strings" // ??
+	"regexp"
+	"strconv" // Atoi()
 )
+
 // Machine Image Client Config
 type CC struct {
   Project string
@@ -31,6 +34,7 @@ type CC struct {
   NameREStr string
   NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
   ChunkDelSize int
+  WorkerLimit int
 }
 
 

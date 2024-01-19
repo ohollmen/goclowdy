@@ -41,8 +41,12 @@ func (p *Pool) Init() error {
 }
 
 func (p *Pool) RequestWork(work func()) (err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(p.cfg.WorkerTimeoutSeconds) *time.Second)
-	defer cancel()
+	ctx := context.Background()
+	if p.cfg.WorkerTimeoutSeconds != 0 {
+	  var cancel context.CancelFunc
+	  ctx, cancel = context.WithTimeout(context.Background(), time.Duration(p.cfg.WorkerTimeoutSeconds) *time.Second)
+	  defer cancel()
+	}
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	p.workChan <- func(ctx context.Context, wg *sync.WaitGroup) func() {
