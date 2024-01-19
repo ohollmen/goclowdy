@@ -10,6 +10,7 @@ import (
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 
 	//"strings" // ??
+	"errors"
 	"regexp"
 	"strconv" // Atoi()
 )
@@ -50,33 +51,58 @@ const (
 func (cfg * CC) Client() * compute.MachineImagesClient {
   return cfg.c
 }
+
+func (cfg * CC) EnvMerge() {
+  if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
+  if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" { cfg.CredF = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") }
+  if os.Getenv("GCP_CLOCK_TZN") != "" { cfg.TZn = os.Getenv("GCP_CLOCK_TZN") }
+  if os.Getenv("MI_STDNAME") != "" { cfg.NameREStr = os.Getenv("MI_STDNAME") }
+  if os.Getenv("MI_CHUNK_DEL_SIZE") != "" { cfg.ChunkDelSize, _ = strconv.Atoi( os.Getenv("MI_CHUNK_DEL_SIZE") ); }
+  if os.Getenv("MI_DELETE_EXEC") != "" { cfg.DelOK = true; } // Any non-empty
+}
+func (cfg * CC) Validate() error {
+  if cfg.Project == "" { return errors.New("No GCP Project !") }
+  if cfg.CredF == "" { return errors.New("No GCP App Credentials file !") }
+  // Part of validation ?
+  if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" {
+    fmt.Printf("Setting G-A-C=%s\n", cfg.CredF);
+    os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF)
+  }
+  return nil
+}
 // Cons: time.ParseDuration("10s") from https://go.dev/blog/package-names
 func (cfg * CC) Init() int {
   ctx := context.Background()
+  cfg.EnvMerge()
   // Default to UTC
-  if os.Getenv("GCP_CLOCK_TZN") != "" { cfg.TZn = "Europe/London" }
+  if cfg.TZn == "" { cfg.TZn = "Europe/London" }
   cfg.tloc, _ = time.LoadLocation(cfg.TZn)
   cfg.tnow = time.Now() // Now=Local
-  if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
-  if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" { cfg.CredF = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") }
+  // Note/Investigate: Setting G_A_C here is effective, but not in Validate() !?
+  os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF)
   // Init client ?
   var err error
   cfg.c, err = compute.NewMachineImagesRESTClient(ctx)
-  if err != nil { fmt.Println("Failed to init GCP MI Rest Client", err); return 1 }
+  if err != nil { fmt.Println("Failed to init GCP MI Rest Client: ", err); return 1 }
   if cfg.StorLoc == "" { cfg.StorLoc = "us"; }
-  //OLD: cfg.DelOK = false
   // Good Defaults for KeepMinH, KeepMaxH
   if cfg.KeepMinH < 1 { cfg.KeepMinH = 168; }
   if cfg.KeepMaxH < 1 { cfg.KeepMaxH = (24 * (365 + 7)); }
   // Naming
-  if (os.Getenv("MI_STDNAME") != "") {
-    cfg.NameRE, err = regexp.Compile(os.Getenv("MI_STDNAME")) // (*Regexp, error) // Also MustCompile
+  // https://pkg.go.dev/regexp
+  //var stdnamere * regexp.Regexp // Regexp
+  //var err error
+  // E.g. "^\\w+-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{4}-\\d{2}-\\d{2}$" (in Go runtime)
+  // E.g. "^[a-z0-9-]+?-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{4}-\\d{2}-\\d{2}$" // No need for 1) \\ before [..-] 2) \ before [ / ]
+  //stdm := stdnamere.MatchString( "myhost-00-00-00-00-1900-01-01" ); // Also reg.MatchString() reg.FindString() []byte()
+  //if !stdm { fmt.Println("STD Name re not matching "); return }
+  if cfg.NameREStr != "" {
+    cfg.NameRE, err = regexp.Compile(cfg.NameREStr) // (*Regexp, error) // Also MustCompile
     if err != nil { fmt.Println("Cannot compile STD name RegExp"); return 1 }
-    cfg.NameREStr = os.Getenv("MI_STDNAME")
   }
   // 
-  if (os.Getenv("MI_CHUNK_DEL_SIZE") != "") { cfg.ChunkDelSize, _ = strconv.Atoi( os.Getenv("MI_CHUNK_DEL_SIZE") ); }
-  if os.Getenv("MI_DELETE_EXEC") != "" { cfg.DelOK = true; }
+  err = cfg.Validate()
+  if err != nil { fmt.Println("Config Validation Failed. Please check your JSON config, Environment vars and CL params."); return 1 }
   return 0
 }
 

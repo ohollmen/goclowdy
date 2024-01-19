@@ -58,6 +58,7 @@ import (
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME"}
 var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME", "MI_CHUNK_DEL_SIZE"}
 // Default MI client config
+// 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
 var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
 // Machine image mini-info. Allow deletion to utilize this (for reporting output). Add creation time ?
 type MIMI struct {
@@ -69,24 +70,27 @@ func main() {
   subcmds := "vm_mi_list,midel,keylist,env"
   if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: "+subcmds); return }
   //if () {}
-  pname := os.Getenv("GCP_PROJECT")
-  if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
-  if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
+  //pname := os.Getenv("GCP_PROJECT")
+  //if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
+  //if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
+  config_load("", &mic);
+
   if os.Args[1] == "vm_mi_list" {
-    vm_ls(pname)
+    vm_ls()
   } else if os.Args[1] == "midel" {
-    mi_del(pname)
+    mi_del()
   } else if os.Args[1] == "keylist" {
-    key_list(pname)
+    key_list()
   } else if os.Args[1] == "env" {
     fmt.Println("# The environment config:")
-    for _, evar := range envcfgkeys { 
-      fmt.Println("export "+ evar+ "="+ os.Getenv(evar)+ "") 
-    }
-    config_load("", &mic);
-    mic.Init();
+    for _, evar := range envcfgkeys { fmt.Println("export "+ evar+ "='"+ os.Getenv(evar)+ "'") }
     jb, _ := json.MarshalIndent(&mic, "", "  ")
-    fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n", jb)
+    fmt.Printf("# Config as JSON (After config load ONLY):\n%s\n\n", jb)
+    mic.Init();
+    for _, evar := range envcfgkeys { fmt.Println("export "+ evar+ "='"+ os.Getenv(evar)+ "'") }
+    jb, _ = json.MarshalIndent(&mic, "", "  ")
+    fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n\n", jb)
+    if mic.NameRE != nil { fmt.Printf(" MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
   } else if os.Args[1] == "subarr" {
     chunks := chunk(names2, 3);
     //chunk(names2, 4);
@@ -105,10 +109,10 @@ func main() {
   return
 }
 
-func vm_ls(pname string) {
+func vm_ls() { // pname string
     //ctx := context.Background()
     // test overlapping sysm (old: vs)
-    vmc := VMs.CC{Project: pname}
+    vmc := VMs.CC{Project: mic.Project}
     vmc.Init()
     all := vmc.GetAll()
     //fmt.Println(all)
@@ -116,7 +120,7 @@ func vm_ls(pname string) {
     if icnt == 0 { fmt.Println("No VMs found"); return }
     fmt.Printf("Got %v Initial Instances (Filtering ...)\n", icnt)
     // Test for daily MI. This is now embedded to mic.CreateFrom() logic.
-    mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  TZn: "Europe/London", Debug: true} // tnow: tnow, tloc: loc
+    //mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  TZn: "Europe/London", Debug: true} // tnow: tnow, tloc: loc
     mic.Init()
     for _, it := range all{ // Instance
       fmt.Println("vname:"+it.GetName())
@@ -132,37 +136,14 @@ func vm_ls(pname string) {
 }
 
 // Delete machine images per given config policy
-func mi_del(pname string) {
+func mi_del() { // pname string
   ctx := context.Background()
-  // midel := os.Getenv("MI_DELETE_EXEC")
-  // https://pkg.go.dev/regexp
-  //var stdnamere * regexp.Regexp // Regexp
-  //var err error
-  // E.g. "^\\w+-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{4}-\\d{2}-\\d{2}$" (in Go runtime)
-  // E.g. "^[a-z0-9-]+?-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{1,3}-\\d{4}-\\d{2}-\\d{2}$" // No need for 1) \\ before [..-] 2) \ before [ / ]
-  /*
-  if (os.Getenv("MI_STDNAME") != "") {
-    stdnamere, err = regexp.Compile(os.Getenv("MI_STDNAME")) // (*Regexp, error) // Also MustCompile
-    if err != nil { fmt.Println("Cannot compile STD name RegExp"); return }
-    //stdm := stdnamere.MatchString( "myhost-00-00-00-00-1900-01-01" ); // Also reg.MatchString() reg.FindString() []byte()
-    //if !stdm { fmt.Println("STD Name re not matching "); return }
-  }
-  */
-  //return
-  // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
-  
-  config_load("", &mic);
+  //config_load("", &mic); // Already on top
   
   rc := mic.Init()
   fmt.Printf("Config (after init): %+v\n", &mic);
-  // TODO: Configdump
-  if false {
-    
-  }
-  //return;
   if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
-  // EARLIER: if midel != "" { mic.DelOK = true; } // Non-empty => DELETE
-  var maxr uint32 = 20
+  var maxr uint32 = 500 // 20
   if mic.Project == "" { fmt.Println("No Project passed"); return }
   req := &computepb.ListMachineImagesRequest{
     Project: mic.Project,
@@ -200,6 +181,7 @@ func mi_del(pname string) {
   }
   // Dry-run - terminate here
   if !mic.DelOK { fmt.Printf("# Dry-run mode, DelOK = %t (%d to delete)\n", mic.DelOK, todel); return; }
+  if len(delarr) == 0 { fmt.Printf("# Nothing to Delete (DelOK = %t, %d to delete)\n", mic.DelOK, todel); return; }
   // Delete items from delarr - either serially or in chunks
   if mic.ChunkDelSize == -1 {
     mimilist_del_chan(mic, delarr)
@@ -207,7 +189,6 @@ func mi_del(pname string) {
     mimilist_del_serial(mic, delarr)
   } else {
     mimilist_del_chunk(mic, delarr)
-    
   }
   
 }
@@ -278,10 +259,11 @@ func mic_delete_mi(mic * MIs.CC, mimi * MIMI) int { // mi *computepb.MachineImag
   return 0
 }
 
-func key_list(pname string) {
+func key_list() {
   ctx := context.Background()
   iamService, err := iam.NewService(ctx)
   if err != nil { fmt.Println("No Service"); return }
+  var pname string = mic.Project
   acct := os.Getenv("GCP_SA")
   pname = os.Getenv("GCP_SA_PROJECT") // override
   if acct == "" { fmt.Println("No GCP_SA"); return }
