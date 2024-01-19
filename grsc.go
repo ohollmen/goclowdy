@@ -52,6 +52,8 @@ import (
 	"encoding/json"
 	"sync" // go get -u golang.org/x/sync
 
+	"math/rand"
+
 	"github.com/ohollmen/goclowdy/workerpool"
 )
 
@@ -141,8 +143,11 @@ func mi_del() { // pname string
   //config_load("", &mic); // Already on top
   
   rc := mic.Init()
+  if rc != 0 {fmt.Printf("MI Clinet Init() failed: %d (%+v)\n", rc, &mic);  }
   fmt.Printf("Config (after init): %+v\n", &mic);
   if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
+  miclstat := map[int]int{0: 0, 1:0, 2:0, 3:0, 4:0, 5:0}
+  //TEST: miclstat_out(mic, miclstat); return;
   var maxr uint32 = 500 // 20
   if mic.Project == "" { fmt.Println("No Project passed"); return }
   req := &computepb.ListMachineImagesRequest{
@@ -157,6 +162,8 @@ func mi_del() { // pname string
   // Iterate MIs, check for need to del
   totcnt := 0; todel := 0;
   verbose := true
+  // Classification stats. Note: no wrapping make() needed w. element initialization
+  
   for {
     //fmt.Println("Next ...");
     mi, err := it.Next()
@@ -166,6 +173,7 @@ func mi_del() { // pname string
     if verbose { fmt.Println("MI:"+mi.GetName()+" (Created: "+mi.GetCreationTimestamp()+")") }
     var cl int = mic.Classify(mi)
     if verbose { fmt.Println(verdict[cl]) }
+    miclstat[cl]++
     if MIs.ToBeDeleted(cl) {
       todel++
       if verbose { fmt.Printf("DELETE %s\n", mi.GetName()) } // Also in DRYRUN
@@ -180,8 +188,8 @@ func mi_del() { // pname string
     totcnt++
   }
   // Dry-run - terminate here
-  if !mic.DelOK { fmt.Printf("# Dry-run mode, DelOK = %t (%d to delete)\n", mic.DelOK, todel); return; }
-  if len(delarr) == 0 { fmt.Printf("# Nothing to Delete (DelOK = %t, %d to delete)\n", mic.DelOK, todel); return; }
+  if !mic.DelOK { fmt.Printf("# Dry-run mode, DelOK = %t (%d to delete)\n", mic.DelOK, todel); miclstat_out(mic, miclstat);return; }
+  if len(delarr) == 0 { fmt.Printf("# Nothing to Delete (DelOK = %t, %d to delete)\n", mic.DelOK, todel); miclstat_out(mic, miclstat);return; }
   // Delete items from delarr - either serially or in chunks
   if mic.ChunkDelSize == -1 {
     mimilist_del_chan(mic, delarr)
@@ -190,8 +198,16 @@ func mi_del() { // pname string
   } else {
     mimilist_del_chunk(mic, delarr)
   }
-  
 }
+
+func miclstat_out(mic MIs.CC, miclstat map[int]int) {
+  // Need: .UTC(). ?
+  fmt.Printf("MI Class (keep/delete reasoning) stats (%s, %s):\n", mic.Project, time.Now().Format("2006-01-02T15:04:05-0700")); // \n%+v\n", miclstat (raw dump)
+  for key, value := range miclstat {
+    fmt.Println("Class:", verdict[key], "(",key,") :", value)
+  }
+}
+
  // Serial Delete
 func mimilist_del_serial(mic MIs.CC, delarr []MIMI) {
     for _, mimi := range delarr { // i
@@ -220,7 +236,13 @@ func mimilist_del_chunk(mic MIs.CC, delarr []MIMI) { // ...
         // (mnot the last value of iteration).
         func (item MIMI) { go mic_delete_mi_wg(&mic, &item, &wg) } (item)
         // test sleeping to not hit API throttling.
-        time.Sleep(time.Millisecond*100)
+        // https://golang.cafe/blog/golang-sleep-random-time.html
+        rand.Seed(time.Now().UnixNano())
+        //ms := time.Millisecond*100
+        //ms = time.Millisecond*(50 + rand.Intn(100))
+        ms := time.Duration(rand.Intn(100)+50) * time.Millisecond
+        fmt.Printf("SLEEP: %d\n", ms);
+        time.Sleep(ms)
       }
       wg.Wait()
       fmt.Printf("Waited for chunk to complete\n");
