@@ -9,6 +9,7 @@ import (
   "context"
   //"strings" // ??
   "regexp"
+  "strconv" // Atoi()
 )
 // Machine Image Client Config
 type CC struct {
@@ -27,7 +28,9 @@ type CC struct {
   c * compute.MachineImagesClient
   DelOK bool
   Debug bool
+  NameREStr string
   NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
+  ChunkDelSize int
 }
 
 
@@ -65,7 +68,11 @@ func (cfg * CC) Init() int {
   if (os.Getenv("MI_STDNAME") != "") {
     cfg.NameRE, err = regexp.Compile(os.Getenv("MI_STDNAME")) // (*Regexp, error) // Also MustCompile
     if err != nil { fmt.Println("Cannot compile STD name RegExp"); return 1 }
+    cfg.NameREStr = os.Getenv("MI_STDNAME")
   }
+  // 
+  if (os.Getenv("MI_CHUNK_DEL_SIZE") != "") { cfg.ChunkDelSize, _ = strconv.Atoi( os.Getenv("MI_CHUNK_DEL_SIZE") ); }
+  if os.Getenv("MI_DELETE_EXEC") != "" { cfg.DelOK = true; }
   return 0
 }
 
@@ -109,6 +116,7 @@ func (cfg * CC) Delete(miname string) error {
   // Call clinet (c) to *actually* delete
   op, err := cfg.c.Delete(ctx, dreq)
   if err != nil { fmt.Printf("Failed to delete MI: %s (%v) ", miname, err); return err; } // mi.GetName()
+  // if cfg.ChunkDelSize == 0 ???
   err = op.Wait(ctx)
   if err != nil { fmt.Println("Error waiting for MI Deletion of ", miname); return err; } // mi.GetName()
   fmt.Println("Success deleting MI: ", miname) // mi.GetName()

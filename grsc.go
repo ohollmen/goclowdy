@@ -9,7 +9,9 @@
 // ```
 // Resources:
 // - https://ueokande.github.io/go-slice-tricks/
-// - 
+// - Go gotchas on slices (pointers to item, etc)
+//   - https://medium.com/@betable/3-go-gotchas-590b8c014e0a
+//   - https://dev.to/kkentzo/the-golang-for-loop-gotcha-1n35
 package main
 
 // go.formatOnSave
@@ -38,10 +40,13 @@ import (
   // NEW
   //"regexp" // responsibility moved to MIs
   "sync" // go get -u golang.org/x/sync
+  "encoding/json"
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME"}
-var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME"}
+var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME", "MI_CHUNK_DEL_SIZE"}
+// Default MI client config
+var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
 // Machine image mini-info. Allow deletion to utilize this (for reporting output). Add creation time ?
 type MIMI struct {
   miname string
@@ -49,12 +54,13 @@ type MIMI struct {
 }
 func main() {
   //ctx := context.Background()
-  if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: vmlist,midel,keylist,env"); return }
+  subcmds := "vm_mi_list,midel,keylist,env"
+  if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: "+subcmds); return }
   //if () {}
   pname := os.Getenv("GCP_PROJECT")
   if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
   if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
-  if os.Args[1] == "vmlist" {
+  if os.Args[1] == "vm_mi_list" {
     vm_ls(pname)
   } else if os.Args[1] == "midel" {
     mi_del(pname)
@@ -64,7 +70,11 @@ func main() {
     fmt.Println("# The environment config:")
     for _, evar := range envcfgkeys { 
       fmt.Println("export "+ evar+ "="+ os.Getenv(evar)+ "") 
-    } 
+    }
+    config_load("", &mic);
+    mic.Init();
+    jb, _ := json.MarshalIndent(&mic, "", "  ")
+    fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n", jb)
   } else if os.Args[1] == "subarr" {
     chunks := chunk(names2, 3);
     //chunk(names2, 4);
@@ -79,7 +89,7 @@ func main() {
       }
       wg.Wait()
     }
-  } else { fmt.Println("Pass one of subcommands: vmlist,milist,keylist"); return }
+  } else { fmt.Println("Pass one of subcommands: "+subcmds); return }
   return
 }
 
@@ -112,7 +122,7 @@ func vm_ls(pname string) {
 // Delete machine images per given config policy
 func mi_del(pname string) {
   ctx := context.Background()
-  midel := os.Getenv("MI_DELETE_EXEC")
+  // midel := os.Getenv("MI_DELETE_EXEC")
   // https://pkg.go.dev/regexp
   //var stdnamere * regexp.Regexp // Regexp
   //var err error
@@ -128,11 +138,18 @@ func mi_del(pname string) {
   */
   //return
   // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
-  mic := MIs.CC{Project: pname,  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
-  // err := json.Unmarshal(Data, &mic)
+  
+  config_load("", &mic);
+  
   rc := mic.Init()
+  fmt.Printf("Config (after init): %+v\n", &mic);
+  // TODO: Configdump
+  if false {
+    
+  }
+  //return;
   if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
-  if midel != "" { mic.DelOK = true; } // Non-empty => DELETE
+  // EARLIER: if midel != "" { mic.DelOK = true; } // Non-empty => DELETE
   var maxr uint32 = 20
   if mic.Project == "" { fmt.Println("No Project passed"); return }
   req := &computepb.ListMachineImagesRequest{
@@ -146,6 +163,7 @@ func mi_del(pname string) {
   var delarr []MIMI
   // Iterate MIs, check for need to del
   totcnt := 0; todel := 0;
+  //silent = 1
   for {
     //fmt.Println("Next ...");
     mi, err := it.Next()
@@ -153,11 +171,6 @@ func mi_del(pname string) {
     if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break }
     
     fmt.Println("MI:"+mi.GetName()+" (Created: "+mi.GetCreationTimestamp()+")")
-    // OLD: stdnamere
-    //if (mic.NameRE != nil) && (!mic.NameRE.MatchString( mi.GetName() )) {
-    //  fmt.Printf("  - NON-STD-NAME: %s\n", mi.GetName())
-    //  continue;
-    //}
     var cl int = mic.Classify(mi)
     fmt.Println(verdict[cl])
     if MIs.ToBeDeleted(cl) {
@@ -173,22 +186,58 @@ func mi_del(pname string) {
     fmt.Printf("============\n")
     totcnt++
   }
+  // Dry-run - terminate here
   if !mic.DelOK { fmt.Printf("# Dry-run mode, DelOK = %t (%d to delete)\n", mic.DelOK, todel); return; }
-  // Delete Here ?
-  for _, mi := range delarr { // i
-    fmt.Printf("%s\n", mi.miname, verdict[mi.class]) // mi.GetName()
-    if mic.DelOK {
-      //OLD:rc := mic_delete_mi(&mic, mi.GetName());
-      rc := mic_delete_mi(&mic, mi.miname);
-      if rc != 0 { }
+  // Delete items from delarr - either serially or in chunks
+  if mic.ChunkDelSize == 0 {
+    mimilist_del_serial(mic, delarr)
+  } else {
+    mimilist_del_chunk(mic, delarr)
+    
+  }
+  
+}
+ // Serial Delete
+func mimilist_del_serial(mic MIs.CC, delarr []MIMI) {
+    for _, mi := range delarr { // i
+      fmt.Printf("%s\n", mi.miname, verdict[mi.class]) // mi.GetName()
+      if mic.DelOK {
+        //OLD:rc := mic_delete_mi(&mic, mi.GetName());
+        rc := mic_delete_mi(&mic, mi.miname);
+        if rc != 0 { }
+      }
+    }
+}
+// Chunk / Parallel delete
+func mimilist_del_chunk(mic MIs.CC, delarr []MIMI) { // ...
+    //return
+    sasize := mic.ChunkDelSize
+    chunks := chunk_mimi(delarr, sasize )
+    if chunks == nil { return }
+    // Modeled along 
+    for i, chunk := range chunks {
+      fmt.Printf("Chunk %d (of %d items): %+v\n", i, sasize, chunk);
+      var wg sync.WaitGroup
+      for _, item := range chunk{
+        wg.Add(1)
+        // Workaround for go remembering the last value for the pointer / chunk (here)
+        // CB closure gets the *current* value in iteration and forces the actual value to be passed
+        // (mnot the last value of iteration).
+        func (item MIMI) { go mic_delete_mi_wg(&mic, &item, &wg) } (item)
+      }
+      wg.Wait()
+      fmt.Printf("Waited for chunk to complete\n");
     }
     return
-    //sasize := 30
-    //chunks := chunk(delarr, sasize )
+}
+// Delete items directly using original lnear delarr using channels (underneath).
+// This runs N items *all* the time instead waiting a "chunk" (where items could take different time
+  // to complete individually, waiting for the longest processing one) to complete.
+func mimilist_del_chan(mic MIs.CC, delarr []MIMI) {
+  for i, mimi := range delarr {
     
   }
 }
-
 func mic_delete_mi(mic * MIs.CC, miname string) int { // mi *computepb.MachineImage
   err := mic.Delete(miname) // mi.GetName()
   if err != nil {
