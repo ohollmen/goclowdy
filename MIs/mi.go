@@ -25,7 +25,7 @@ type CC struct {
   KeepMaxH int
   // Priv
   tnow time.Time
-  tloc * time.Location
+  Tloc * time.Location
   StorLoc string
   //tnow Time
   // ctx !!
@@ -76,7 +76,7 @@ func (cfg * CC) Init() int {
   cfg.EnvMerge()
   // Default to UTC
   if cfg.TZn == "" { cfg.TZn = "Europe/London" }
-  cfg.tloc, _ = time.LoadLocation(cfg.TZn)
+  cfg.Tloc, _ = time.LoadLocation(cfg.TZn)
   cfg.tnow = time.Now() // Now=Local
   // Note/Investigate: Setting G_A_C here is effective, but not in Validate() !?
   os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF)
@@ -107,7 +107,7 @@ func (cfg * CC) Init() int {
 }
 
 func (cfg * CC) Classify(mi * computepb.MachineImage) int {
-  t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.tloc) // Def. UTC
+  t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc) // Def. UTC
   nd := cfg.tnow.Sub(t) // Duration/Age
   if err != nil { return KEEP_SAFE; }
   hrs := nd.Hours()

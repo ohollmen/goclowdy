@@ -54,11 +54,14 @@ import (
 
 	"math/rand"
 
+	"flag"
+
 	"github.com/ohollmen/goclowdy/workerpool"
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME"}
 var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME", "MI_CHUNK_DEL_SIZE"}
+var wdnames = []string{"SUN","MON","TUE","WED","THU","FRI","SAT"}
 // Default MI client config
 // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
 var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
@@ -69,6 +72,9 @@ type MIMI struct {
 }
 func main() {
   //ctx := context.Background()
+  //flag.StringVar(&(mic.Project), "project", "", "GCP Cloud project (string) id")
+  var project string
+  flag.StringVar(&project, "project", "NoN", "GCP Cloud project (string) id")
   subcmds := "vm_mi_list,midel,keylist,env"
   if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: "+subcmds); return }
   //if () {}
@@ -76,7 +82,9 @@ func main() {
   //if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
   //if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
   config_load("", &mic);
-
+  flag.Parse()
+  fmt.Printf("XXXX Project=%s\n", project)
+  return
   if os.Args[1] == "vm_mi_list" {
     vm_ls()
   } else if os.Args[1] == "midel" {
@@ -90,6 +98,8 @@ func main() {
     fmt.Printf("# Config as JSON (After config load ONLY):\n%s\n\n", jb)
     mic.Init();
     for _, evar := range envcfgkeys { fmt.Println("export "+ evar+ "='"+ os.Getenv(evar)+ "'") }
+    //flag.Parse()
+    //fmt.Printf("XXXX Project=%s\n", project)
     jb, _ = json.MarshalIndent(&mic, "", "  ")
     fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n\n", jb)
     if mic.NameRE != nil { fmt.Printf(" MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
@@ -107,6 +117,8 @@ func main() {
       }
       wg.Wait()
     }
+  } else if os.Args[1] == "milist" {
+    mi_list()
   } else { fmt.Println("Pass one of subcommands: "+subcmds); return }
   return
 }
@@ -136,7 +148,34 @@ func vm_ls() { // pname string
     }
     return
 }
-
+func mi_list() {
+  ctx := context.Background()
+  rc := mic.Init()
+  if rc != 0 {fmt.Printf("MI Clinet Init() failed: %d (%+v)\n", rc, &mic);  }
+  var maxr uint32 = 500 // 20
+  if mic.Project == "" { fmt.Println("No Project passed"); return }
+  req := &computepb.ListMachineImagesRequest{
+    Project: mic.Project,
+    MaxResults: &maxr } // Filter: &mifilter } // 
+  if req == nil { return; }
+  it := mic.Client().List(ctx, req)
+  if it == nil { fmt.Println("No mi:s from "+mic.Project); }
+  totcnt := 0
+  for {
+    //fmt.Println("Next ...");
+    mi, err := it.Next()
+    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break }
+    if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break }
+    // NOTE: We are not deleting here, only classifying (w. interest in KEEP_WD, DEL_1W)
+    var cl int = mic.Classify(mi)
+    //if verbose { fmt.Println(verdict[cl]) }
+    if (cl == MIs.KEEP_WD) || (cl == MIs.DEL_1W) {
+      t, _ := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), mic.Tloc) // Def. UTC
+      wd := int(t.Weekday());
+      fmt.Printf("%s %s %s\n", mi.GetName(), verdict[cl], wdnames[wd]) // 
+    }
+  }
+}
 // Delete machine images per given config policy
 func mi_del() { // pname string
   ctx := context.Background()
@@ -155,7 +194,7 @@ func mi_del() { // pname string
     MaxResults: &maxr } // Filter: &mifilter } // 
   //fmt.Println("Search MI from: "+cfg.Project+", parse by: "+time.RFC3339)
   it := mic.Client().List(ctx, req)
-  if it == nil { fmt.Println("No mis from "+mic.Project); }
+  if it == nil { fmt.Println("No mi:s from "+mic.Project); }
   // https://code.googlesource.com/gocloud/+/refs/tags/v0.101.1/compute/apiv1/machine_images_client.go
   //var delarr []*computepb.MachineImage // var item *computepb.MachineImage
   var delarr []MIMI
