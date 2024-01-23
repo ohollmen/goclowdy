@@ -73,8 +73,12 @@ type MIMI struct {
 func main() {
   //ctx := context.Background()
   //flag.StringVar(&(mic.Project), "project", "", "GCP Cloud project (string) id")
+  //fooCmd := flag.NewFlagSet("foo", 0) // flag.ExitOnError
+  //if fooCmd != nil { return; }
   var project string
   flag.StringVar(&project, "project", "NoN", "GCP Cloud project (string) id")
+  flag.Parse() // os.Args[2:] From Args[2] onwards
+  fmt.Printf("XXXX Project=%s\n", project)
   subcmds := "vm_mi_list,midel,keylist,env"
   if len(os.Args) < 2 { fmt.Println("Pass one of subcommands: "+subcmds); return }
   //if () {}
@@ -82,9 +86,8 @@ func main() {
   //if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
   //if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
   config_load("", &mic);
-  flag.Parse()
-  fmt.Printf("XXXX Project=%s\n", project)
-  return
+  
+  //return
   if os.Args[1] == "vm_mi_list" {
     vm_ls()
   } else if os.Args[1] == "midel" {
