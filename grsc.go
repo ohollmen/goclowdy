@@ -175,7 +175,7 @@ func mi_list() {
     if (cl == MIs.KEEP_WD) || (cl == MIs.DEL_1W) {
       t, _ := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), mic.Tloc) // Def. UTC
       wd := int(t.Weekday());
-      fmt.Printf("%s %s %s\n", mi.GetName(), verdict[cl], wdnames[wd]) // 
+      fmt.Printf("%s %s %s %s\n", mi.GetName(), mi.GetCreationTimestamp(), verdict[cl], wdnames[wd]) // 
     }
   }
 }
