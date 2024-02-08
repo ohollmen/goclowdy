@@ -1,0 +1,39 @@
+# TODO: Allow expanding templated version by:
+# cat global.conf.json | ./node_modules/mustache/bin/mustache - ./Dockerfile.goclowdy > Dockerfile.expanded
+# Basic build: docker build -f docker/Dockerfile.goclowdy .
+# Test image: docker run -it imagename /bin/sh
+# Potentially run Go cross compile on host (e.g. MacOS):
+# $ CGO_ENABLED=0 GOOS=linux go build .
+# Examples of sampling filetype of binary by `file goclowdy` with native compile vs (linux) cross-compile:
+# $ file goclowdy
+# goclowdy: Mach-O 64-bit executable x86_64
+# $ file goclowdy
+# goclowdy: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, Go BuildID=7FTye7...AHpE, with debug_info, not stripped
+#FROM {{{ img1 }}} as build
+#FROM registry.access.redhat.com/ubi8/go-toolset:latest as build
+FROM golang:1.19.13-alpine3.18 as build
+LABEL maintainer="Olli Hollmen" description="GoClowdy Tools Container"
+# Not needed for "go-toolset" image
+#RUN sudo dnf update && microdnf install -y
+USER root
+RUN mkdir -p /app
+# DEBUG (To ensure binary is of correct type)
+#RUN microdnf update && microdnf install -y file strace
+RUN apk add strace
+# Copy source code
+WORKDIR /app
+COPY ./ .
+# Build (not needed: go mod init myapp)
+#RUN go mod tidy
+# &&
+#RUN CGO_ENABLED=0 GOOS=linux go build .
+CMD /bin/bash
+# 2nd stage
+# FROM {{{ img2 }}}
+#FROM registry.access.redhat.com/ubi8/ubi-minimal:8.9-1108.1706795067
+#USER root
+#RUN microdnf update && microdnf install -y strace
+#RUN mkdir /app
+#WORKDIR /app
+#COPY --from=build /app/goclowdy /app/goclowdy
+#CMD ./goclowdy

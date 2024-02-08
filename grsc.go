@@ -176,6 +176,7 @@ func mi_list() {
       t, _ := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), mic.Tloc) // Def. UTC
       wd := int(t.Weekday());
       fmt.Printf("%s %s %s %s\n", mi.GetName(), mi.GetCreationTimestamp(), verdict[cl], wdnames[wd]) // 
+      if mic.Debug { fmt.Printf("%s %s (%d)\n", t.UTC(), t.UTC().Weekday(), int(t.UTC().Weekday()) ); } // DEBUG UTC()
     }
   }
 }
