@@ -1,39 +1,51 @@
 # TODO: Allow expanding templated version by:
 # cat global.conf.json | ./node_modules/mustache/bin/mustache - ./Dockerfile.goclowdy > Dockerfile.expanded
-# Basic build: docker build -f docker/Dockerfile.goclowdy .
+# Basic build: docker build -t goclowdy:0.0.1 -f docker/Dockerfile.goclowdy .
 # Test image: docker run -it imagename /bin/sh
-# Potentially run Go cross compile on host (e.g. MacOS):
+# Potentially run Go cross compile on host (e.g. MacOS, CGO_ENABLED=0 prevents dyn. linkage, GOOS=linux ensures correct executable format):
 # $ CGO_ENABLED=0 GOOS=linux go build .
 # Examples of sampling filetype of binary by `file goclowdy` with native compile vs (linux) cross-compile:
 # $ file goclowdy
 # goclowdy: Mach-O 64-bit executable x86_64
 # $ file goclowdy
 # goclowdy: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, Go BuildID=7FTye7...AHpE, with debug_info, not stripped
+# w/o ... as build got error:
+# invalid from flag value build: pull access denied for build, repository does not exist or may require 'docker login': denied: requested access to the resource is denied
+# Problem with alpine first-stage:
+#sh-4.4# file goclowdy
+#goclowdy: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-musl-x86_64.so.1, with debug_info, not stripped
+# sh-4.4# ./goclowdy 
+# sh: ./goclowdy: No such file or directory
+# RH Images (no CGO_ENABLED=0):
+# goclowdy: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=ae371e9ba73278cc0d19050f5c621232c57c0d92, with debug_info, not stripped
+# RH Images (with CGO_ENABLED=0):
+# goclowdy: ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, with debug_info, not stripped
 #FROM {{{ img1 }}} as build
-#FROM registry.access.redhat.com/ubi8/go-toolset:latest as build
-FROM golang:1.19.13-alpine3.18 as build
+FROM registry.access.redhat.com/ubi8/go-toolset:latest as build
+#FROM golang:1.19.13-alpine3.18 as build
 LABEL maintainer="Olli Hollmen" description="GoClowdy Tools Container"
-# Not needed for "go-toolset" image
-#RUN sudo dnf update && microdnf install -y
+# Not needed for "go-toolset:latest" image
+#RUN sudo dnf update && microdnf install -y go-toolset
 USER root
+# DEBUG (Install file to ensure binary is of correct type) Choose: dnf/microdnf (per env)
+#RUN dnf update -y && dnf install -y file strace go-toolset
+#RUN apk add --no-cache strace
+# Create dir, Copy source code
 RUN mkdir -p /app
-# DEBUG (To ensure binary is of correct type)
-#RUN microdnf update && microdnf install -y file strace
-RUN apk add strace
-# Copy source code
 WORKDIR /app
 COPY ./ .
-# Build (not needed: go mod init myapp)
-#RUN go mod tidy
+# Build (not needed: go mod init myapp) w. CGO_ENABLED=0 to have no dyn. linkage.
+RUN go mod tidy
 # &&
-#RUN CGO_ENABLED=0 GOOS=linux go build .
-CMD /bin/bash
-# 2nd stage
+RUN  CGO_ENABLED=0 go build .
+CMD /bin/sh
+##### 2nd stage ######
 # FROM {{{ img2 }}}
-#FROM registry.access.redhat.com/ubi8/ubi-minimal:8.9-1108.1706795067
-#USER root
-#RUN microdnf update && microdnf install -y strace
-#RUN mkdir /app
-#WORKDIR /app
-#COPY --from=build /app/goclowdy /app/goclowdy
+FROM registry.access.redhat.com/ubi8/ubi-minimal:8.9-1108.1706795067
+USER root
+#RUN microdnf update && microdnf install -y file strace
+RUN mkdir /app
+WORKDIR /app
+COPY --from=build /app/goclowdy /app/goclowdy.conf.json /app/
 #CMD ./goclowdy
+CMD /bin/sh
