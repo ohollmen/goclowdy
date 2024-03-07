@@ -8,18 +8,23 @@ import (
 
 	compute "cloud.google.com/go/compute/apiv1"
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
+	"google.golang.org/api/iterator"
 
 	//"strings" // ??
 	"errors"
 	"regexp"
 	"strconv" // Atoi()
+
+	"flag"
+
+	"github.com/codingconcepts/env"
 )
 
 // Machine Image Client Config
 type CC struct {
-  Project string
-  CredF string
-  TZn string
+  Project string  `env:"GCP_PROJECT"`
+  CredF string    `env:"GOOGLE_APPLICATION_CREDENTIALS"`
+  TZn string      `env:"GCP_CLOCK_TZN"`
   WD_keep int
   KeepMinH int // dur_keep_all => KeepMinH
   KeepMaxH int
@@ -30,11 +35,13 @@ type CC struct {
   //tnow Time
   // ctx !!
   c * compute.MachineImagesClient
-  DelOK bool
+  DelOK bool       `env:"MI_DELETE_EXEC"`
   Debug bool
-  NameREStr string
+  NameREStr string `env:"MI_STDNAME"`
   NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
-  ChunkDelSize int
+  HostREStr string `env:"MI_HOSTPATT"`
+  HostRE * regexp.Regexp
+  ChunkDelSize int  `env:"MI_CHUNK_DEL_SIZE"`
   WorkerLimit int
 }
 
@@ -51,7 +58,7 @@ const (
 func (cfg * CC) Client() * compute.MachineImagesClient {
   return cfg.c
 }
-
+// Apply non-empty env. vars to config members.
 func (cfg * CC) EnvMerge() {
   if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
   if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" { cfg.CredF = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") }
@@ -71,9 +78,19 @@ func (cfg * CC) Validate() error {
   return nil
 }
 // Cons: time.ParseDuration("10s") from https://go.dev/blog/package-names
-func (cfg * CC) Init() int {
+func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch after env
   ctx := context.Background()
-  cfg.EnvMerge()
+  //cfg.EnvMerge()
+  // Note: This (w. `env:...` tags seems to handle the type conversions (even bool value 0)
+  err := env.Set(cfg)
+  if err != nil { fmt.Println("Error setting config mems from env !"); return 1  }
+  // Parse CL agcs right after (this sets the timing of parsing)
+  flag.Parse()
+  // CL params from map ?
+  //if len(clpara): { // OR: clpara
+  //  if clpara["project"]  != "" { cfg.Project = clpara["project"]; }
+  //  if clpara["appcreds"] != "" { cfg.CredF = clpara["appcreds"]; } // CredF
+  //}
   // Default to UTC
   if cfg.TZn == "" { cfg.TZn = "Europe/London" }
   cfg.Tloc, _ = time.LoadLocation(cfg.TZn)
@@ -81,7 +98,7 @@ func (cfg * CC) Init() int {
   // Note/Investigate: Setting G_A_C here is effective, but not in Validate() !?
   os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF)
   // Init client ?
-  var err error
+  // var err error
   cfg.c, err = compute.NewMachineImagesRESTClient(ctx)
   if err != nil { fmt.Println("Failed to init GCP MI Rest Client: ", err); return 1 }
   if cfg.StorLoc == "" { cfg.StorLoc = "us"; }
@@ -100,10 +117,21 @@ func (cfg * CC) Init() int {
     cfg.NameRE, err = regexp.Compile(cfg.NameREStr) // (*Regexp, error) // Also MustCompile
     if err != nil { fmt.Println("Cannot compile STD name RegExp"); return 1 }
   }
+  if cfg.HostREStr != "" {
+    cfg.HostRE, err = regexp.Compile(cfg.HostREStr)
+    if err != nil { fmt.Println("Cannot compile hostpatt RegExp"); return 1 }
+  }
   // 
   err = cfg.Validate()
   if err != nil { fmt.Println("Config Validation Failed. Please check your JSON config, Environment vars and CL params."); return 1 }
   return 0
+}
+
+func (cfg * CC) AgeHours(mi * computepb.MachineImage) float64 { // int ?
+  t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
+  if err != nil { return -1; }
+  nd := cfg.tnow.Sub(t) // Duration/Age
+  return nd.Hours(); // cast int ? round ?
 }
 
 func (cfg * CC) Classify(mi * computepb.MachineImage) int {
@@ -215,6 +243,29 @@ func (cfg * CC) GetOne(in string) *computepb.MachineImage {
   mi, err := cfg.c.Get(ctx, req)
   if err != nil { fmt.Println("Error fetching ", in); return nil }
   return mi
+}
+// New do-it-all search. Client MUST be inited before.
+func (mic * CC) GetAll() []*computepb.MachineImage {
+  ctx := context.Background()
+  var arr []*computepb.MachineImage  // MIMI
+  var maxr uint32 = 500 // 20
+  if mic.Project == "" { fmt.Println("No Project passed"); return nil }
+  req := &computepb.ListMachineImagesRequest{
+    Project: mic.Project,
+    MaxResults: &maxr } // Filter: &mifilter } // 
+  if req == nil { return nil }
+  it := mic.Client().List(ctx, req)
+  if it == nil { fmt.Println("No mi:s from "+mic.Project); return nil }
+  totcnt := 0
+  for {
+    //fmt.Println("Next ..."); // DEBUG
+    mi, err := it.Next()
+    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break }
+    if mi == nil { fmt.Println("No mi gotten in iteration. check (actual) creds, project etc."); break }
+    arr = append(arr, mi)
+    totcnt++
+  }
+  return arr
 }
 // ...StdName(i.GetName()). TODO: Opt date
 func StdName(mn string) string {
