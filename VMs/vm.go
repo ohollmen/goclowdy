@@ -1,26 +1,30 @@
-
 package VMs
 
 import (
-  compute "cloud.google.com/go/compute/apiv1"
-  computepb "cloud.google.com/go/compute/apiv1/computepb"
-  //"time"
-  "os"
-  "fmt"
-  "context"
-  "strconv"
-  "google.golang.org/api/iterator"
-  "google.golang.org/protobuf/proto"
-  "sync"
-  "unsafe"
-  "strings"
-  "time"
-  "regexp"
+	"os"
+
+	compute "cloud.google.com/go/compute/apiv1"
+	computepb "cloud.google.com/go/compute/apiv1/computepb"
+
+	//"time"
+
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+	"unsafe"
+
+	"github.com/codingconcepts/env"
+	"google.golang.org/api/iterator"
+	"google.golang.org/protobuf/proto"
 )
+
 // VM Client Config
 type CC struct {
-  Project string
-  //CredF string
+  Project string  `env:"GCP_PROJECT"`
+  CredF string    `env:"GOOGLE_APPLICATION_CREDENTIALS"`
   c * compute.InstancesClient
   Debug bool
 }
@@ -36,6 +40,7 @@ type IterCfg struct {
 // - Filtering by Zones, Host-Pattern, Labels
 type InfraPara struct {
   Project string `json:"project"`
+  //CredF string    `env:"GOOGLE_APPLICATION_CREDENTIALS"`
   Zones []string `json:"zones"`
   //Regions []string `json:"regions"`
   Patt string `json:"patt"`
@@ -46,14 +51,22 @@ type InfraPara struct {
   //Ts int64
   Debug bool `json:"debug"`
 }
-
-func (cfg * CC) Init() int {
+// Machine image stats for VM Host. Used initially during stats collection (map[string]*MIStat)
+type MIStat struct {
+  Hostname string // Add this to make this fit for final JSON reporting
+  Mincnt int
+  Maxcnt int
+}
+func (cfg * CC) Init() error {
   ctx := context.Background()
   // && ! cfg.Project
-  if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
-  cfg.c, _ = compute.NewInstancesRESTClient(ctx)
-  //if err != nil { return 1 }
-  return 1
+  //if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
+  env.Set(cfg)
+  if cfg.CredF != "" { os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF) }
+  var err error = nil
+  cfg.c, err = compute.NewInstancesRESTClient(ctx)
+  if err != nil { return err }
+  return nil
 }
 func (cfg * CC) GetAll() []*computepb.Instance { // ctx context.Context,
   //project := cfg.Project
@@ -76,7 +89,7 @@ func (cfg * CC) GetAll() []*computepb.Instance { // ctx context.Context,
     i += 1
     if err == iterator.Done { break }
     if err != nil {
-      fmt.Println("Iter error\n" + strconv.Itoa(i))
+      fmt.Printf("Iter error %v (%d)", err, i) // strconv.Itoa(i)
       break
     }
     instances := resp.Value.Instances // pair. ?
@@ -88,6 +101,19 @@ func (cfg * CC) GetAll() []*computepb.Instance { // ctx context.Context,
     // if cb { }
   }
   return vm_all
+}
+// Create and populate a stats map for all the VMs (for e.g. MI stats)
+func CreateStatMap(iarr []*computepb.Instance) map[string]*MIStat {
+  stats := make(map[string]*MIStat) // Must make() w/o init
+  for _, it := range iarr {
+    //fmt.Println(it)
+    //if stats[it.GetName()] {
+    //} else { }
+    // Changed to ptr (&): cannot assign to struct field stats[m[1]].Mincnt in map
+    // https://www.quora.com/In-Go-how-do-I-use-a-map-with-a-string-key-and-a-struct-as-value
+    stats[it.GetName()] = &MIStat{Hostname: it.GetName(), Mincnt:0, Maxcnt: 0 } // Just init !
+  }
+  return stats
 }
 // 
 func (cfg * CC) ForEachVM(iarr []*computepb.Instance, cb func (*computepb.Instance) error ) {
