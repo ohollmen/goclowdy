@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt" // for name
 	"os"
+	"sync"
 	"time"
 
 	compute "cloud.google.com/go/compute/apiv1"
@@ -43,6 +44,7 @@ type CC struct {
   HostRE * regexp.Regexp
   ChunkDelSize int  `env:"MI_CHUNK_DEL_SIZE"`
   WorkerLimit int
+  Wg * sync.WaitGroup // Do not init, use only when context requires
 }
 
 
@@ -183,7 +185,7 @@ func (cfg * CC) Delete(miname string) error {
 
 // inst * computepb.Instance (Instead of mini, make variadic ?)
 // OLD: mini * string
-// TODO: Allow options: altsuff, force
+// options: force is in effect by cfg.DelOK
 func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { // , cfg * CC c * compute.MachineImagesClient
   
   var storageLocation []string
@@ -192,19 +194,24 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { //
   // Figure out MI name
   if altsuff == "" { imgname = StdName(inst.GetName())
   } else { imgname = inst.GetName() + "-" + altsuff }
+  if cfg.Debug { fmt.Printf("MI name to use: %s, storloc: %s\n", imgname, storageLocation[0]); }
+  if cfg.Wg != nil { fmt.Printf("Got Wg - defer...\n"); defer cfg.Wg.Done(); }
   // Check existing. This is good no matter what for clarity and possibly avoiding creation call
   mi := cfg.GetOne(imgname)   // , cfg.c
   if mi != nil  {
     fmt.Println("Found (name-overlapping) MI: ", imgname)
     // Skip (What to return)
-    if cfg.DelOK == false { fmt.Println("Skipping MI creation becase MI exists and no Forcing is on."); return nil; }
+    if cfg.DelOK == false { fmt.Printf("Skipping MI creation for '%s' becase MI exists and no Forcing is on.\n", imgname); return nil; }
     // or Delete (on DelOK/force)
     err := cfg.Delete(mi.GetName())
     if err != nil { fmt.Printf("Tried deleting MI with overlapping name (%s), but failed: %v\n", imgname, err); return err; }
+  } else {
+    fmt.Println("No overlaps Found for MI-name: ", imgname)
   }
   //NONEED:instance_path := cfg.instpath(inst) // pass: Instance
   instance_path := inst.GetSelfLink()
-  // Orig examples propose closing of client here. is that necessary ?
+  fmt.Printf("Instance-path: %s\n", instance_path)
+  // Orig examples propose closing of client here. is that necessary ? Answer: NO - there is no concurrency problems w. client.
   // This would imply a full re-instantiation / re-config of client
   // Likely because client is established in the orig. func scope.
   //defer cfg.c.Close()
@@ -219,16 +226,17 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { //
       // MachineImageEncryptionKey: &computepb.CustomerEncryptionKey{ KmsKeyName: &kkn, }, // Key name
     },
   }
+  // Do we need to share exact context with the caller ? A: No need to do that.
   ctx := context.Background()
-  op, err := cfg.c.Insert(ctx, req) // cfg.c
+  op, err := cfg.c.Insert(ctx, req)
   // instancename := inst.GetName() // mini
   if err != nil {
-    fmt.Printf("Error in Insert - vm image failed for instance %s - %v\n", inst.GetName() , err)
+    fmt.Printf("Error in c.Insert() - MI creation failed for instance '%s': %v\n", inst.GetName() , err)
     return(err)
   }
   err = op.Wait(ctx)
   if err != nil {
-    fmt.Printf("Error in Wait(ctx) - vm image failed for instance %s - %v\n", inst.GetName() , err)
+    fmt.Printf("Error in op.Wait(ctx) - MI Creation failed for instance %s: %v\n", inst.GetName() , err)
     return(err)
   }
   fmt.Println("Success creating MI: ", imgname) // on debug
@@ -241,7 +249,8 @@ func (cfg * CC) GetOne(in string) *computepb.MachineImage {
   req := &computepb.GetMachineImageRequest{MachineImage: in, Project: cfg.Project}
   // https://pkg.go.dev/cloud.google.com/go/compute/apiv1#MachineImagesClient.Get
   mi, err := cfg.c.Get(ctx, req)
-  if err != nil { fmt.Println("Error fetching ", in); return nil }
+  if err != nil { fmt.Printf("Error fetching MI: %s %v\n", in, err); return nil }
+  if cfg.Debug {  fmt.Printf("Got mi: %s\n", mi.GetName() ); }
   return mi
 }
 // New do-it-all search. Client MUST be inited before.

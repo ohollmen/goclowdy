@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os" // Args
 	"reflect"
+	"regexp"
 	"time"
 
 	"google.golang.org/api/iterator"
@@ -93,8 +94,9 @@ var scomms = []SubComm{
   {"keylist",  "List SA Keys from a GCP Project", key_list},
   {"env",      "List goclowdy (utility) config and environment", env_ls},
   {"subarr",   "Subarray Test", subarr_test},
-  {"milist",   "List Machine Images", mi_list},
-  //{"","",},
+  {"milist",   "List Machine Images (With time stats)", mi_list},
+  {"vmbackup", "Backup VMs from a project", vm_backup},
+  //{"","",},//{"","",},
 
 }
 // Env-to-member mapping ( "GOOGLE_APPLICATION_CREDENTIALS" : "CredF")
@@ -111,7 +113,7 @@ func usage(msg string) {
 }
 // Extract subcommand (op) and remove it from os.Argv (for flags module)
 func args_subcmd() string {
-  if len(os.Args) < 2 { return "" }
+  if len(os.Args) < 2 { return "" } // No room for a subcommand
   if mic.Debug { fmt.Printf("Args: %v\n", os.Args) }
   op := os.Args[1:2][0]
   if mic.Debug { fmt.Printf("OP: %v\n", op); }
@@ -174,49 +176,24 @@ func args_env_merge(e2sm map[string]string, mystruct any ) int { // UNUSED (repl
 }
 func main() {
   //ctx := context.Background()
-  //flag.StringVar(&(mic.Project), "project", "", "GCP Cloud project (string) id")
-  //fooCmd := flag.NewFlagSet("foo", 0) // flag.ExitOnError
-  //if fooCmd != nil { return; }
-  //var project string
+  
   if len(os.Args) < 2 { usage("Subcommand missing !"); return; } // fmt.Println("Pass one of subcommands: "+subcmds); return
   op := args_subcmd()
-  args_bind() // OLD: clpara. Bind here, parse later.
+  args_bind() // OLD: clpara. Bind here, call flag.Parse() later.
   
   //flag.Parse() // os.Args[2:] From Args[2] onwards
   //fmt.Printf("CL-ARGS(map): %v\n", clpara);
-  //subcmds := "vm_mi_list,midel,keylist,env"
+  
   
   //if () {}
   //pname := os.Getenv("GCP_PROJECT")
   //if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
   //if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
   config_load("", &mic);
-  //args_override() // MUST actually call after mic.Init()
-  
-  //ocnt := args_env_merge(argmap, mic)
-  //if ocnt < 0 { fmt.Printf(""); return; }
-  //return
-  // OLD Comp (e.g.): os.Args[1] == "vm_mi_list"
+  //NOT:args_override() // OLD: Worked on bindpara. Would need to call after mic.Init()
   idx := slices.IndexFunc(scomms, func(sc SubComm) bool { return sc.cmd == op })
   scomms[idx].cb()
   return
-  /*
-  if (idx < 0) { usage("Could not find subcommand: "+ op); }
-  if op == "vm_mi_list" {
-    vm_ls()
-  } else if op == "midel" {
-    mi_del()
-  } else if op == "keylist" {
-    key_list()
-  } else if op == "env" {
-    env_ls()
-  } else if op == "subarr" {
-    subarr_test()
-  } else if op == "milist" {
-    mi_list()
-  } else { usage("Subcommand not supported"); return }
-  return
-  */
 }
 
 func env_ls() {
@@ -233,20 +210,63 @@ func env_ls() {
     fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n\n", jb)
     if mic.NameRE != nil { fmt.Printf(" MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
 }
-func subarr_test() {
-  chunks := chunk(names2, 3);
-    //chunk(names2, 4);
-    //chunk(names2, 5);
-    //chunk(names2, 20);
-    for i, chunk := range chunks {
-      fmt.Printf("Chunk %d: %+v\n", i, chunk);
-      var wg sync.WaitGroup
-      for _, item := range chunk{
-        wg.Add(1)
-        go hello(item, &wg)
-      }
-      wg.Wait()
+// Backup VMs froma GCP Project
+func vm_backup() {
+  // Need vmc and mic
+  // vmc ...
+  vmc := VMs.CC{Project: mic.Project, CredF: mic.CredF};
+  err := vmc.Init() // Will pickup 
+  if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
+  
+  // Same workaround as for mi_list
+  flag.Parse()
+  vmc.Project = mic.Project;
+  fmt.Printf("vmc Project: %s\n", vmc.Project);
+  // mic ...
+  rc := mic.Init()
+  if rc != 0 { fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
+  fmt.Printf("mic Project: %s\n", mic.Project);
+  
+  all := vmc.GetAll() //; fmt.Println(all)
+  // Filter the superset "all". Note: Improve/extend initial slim / narrow VM name based fitering implementation
+  namepatt := os.Getenv("GCP_VM_NAMEPATT") // TODO: param from ...
+  if namepatt != "" {
+    fmt.Printf("Got namepatt (GCP_VM_NAMEPATT): %s\n", namepatt)
+    NameRE, err := regexp.Compile(namepatt)
+    if err != nil { fmt.Printf("namepatt (RE) not comiled: %s\n", err); return; }
+    var ftd []*computepb.Instance
+    for _, vm := range all { // FindStringSubmatch
+      if NameRE.FindString(vm.GetName()) != "" { ftd = append(ftd, vm); }
     }
+    all = ftd
+  }
+  icnt := len(all)
+  if icnt == 0 { fmt.Println("No VMs found"); return }
+  
+  fmt.Printf("%d VMs to backup\n", icnt);
+  mic.Debug = true
+  //fmt.Printf("# Got %v  Instances\n", icnt) // Initial ... (Filtering ...)
+  //return;
+  // Iterate VM:s
+  var wg sync.WaitGroup
+  mic.Wg = &wg
+  // Initially: all listed in VM-to-backup: ..., but only 3 or 4 show "MI name to use: ..." see: 
+  cb := func(vm *computepb.Instance) {
+    //defer wg.Done()
+    go mic.CreateFrom(vm, "testsuffix")
+  }
+  for _, vm := range all{ // Instance
+    wg.Add(1) // if wg
+    fmt.Println("VM-to-backup: ", vm.GetName()) // if mc.Debug
+    //go cb(item, icfg.Userdata);
+    // 2nd: altsuff ... will be appended staring w. '-'
+    go cb(vm) // mic.CreateFrom(vm, "testsuffix")
+    //wg.Done() // if wg
+
+  }
+  mic.Wg = nil // Set null for client reuse
+  wg.Wait()
+  
 }
 // List VMs. Set GCP_PROJECT and GOOGLE_APPLICATION_CREDENTIALS as needed (or get from config)
 func vm_ls() { // pname string
@@ -279,13 +299,20 @@ func vm_ls() { // pname string
     }
     return
 }
-// New MI List. Mix VMs and MIs (See: vm_ls() for "ingredients" of solution)
+// New MI List with statistical count of MIs per time eras (now...1w, 1w...1y).
+// Mix of access to VMs (find all) and MIs (See: vm_ls() for "ingredients" of solution)
 func mi_list() {
   //ctx := context.Background()
   //////// VMs //////////
+  fmt.Printf("Proj: %s\n", mic.Project);
   vmc := VMs.CC{Project: mic.Project, CredF: mic.CredF} //  
   err := vmc.Init()
+  // Note: the flag.Parse() and Project reassign are workaround for inherent state problems for the
+  // config -> env env.Set(cfg)-> CL flag.Parse() override seq.
+  flag.Parse()
+  vmc.Project = mic.Project;
   if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
+  fmt.Printf("Proj: %s\n", vmc.Project);
   allvms := vmc.GetAll()
   if len(allvms) < 1 { fmt.Println("No VMs found"); return; }
   stats := VMs.CreateStatMap(allvms)
@@ -333,58 +360,7 @@ func mi_list() {
   fmt.Printf("%s\n", jba) // Ok w. []byte
   fmt.Printf("# %d Images from %s\n", totcnt, mic.Project);
 }
-// Old unnecessarily complex version of mi_list
-func mi_list_OLD() {
-  ctx := context.Background()
-  rc := mic.Init()
-  if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
 
-  var maxr uint32 = 500 // 20
-  if mic.Project == "" { fmt.Println("No Project passed"); return }
-  req := &computepb.ListMachineImagesRequest{
-    Project: mic.Project,
-    MaxResults: &maxr } // Filter: &mifilter } // 
-  if req == nil { return; }
-  it := mic.Client().List(ctx, req)
-  if it == nil { fmt.Println("No mi:s from "+mic.Project); return; }
-  totcnt := 0
-  //HostREStr := os.Getenv("MI_HOSTPATT");
-  //var HostRE * regexp.Regexp = nil
-  if mic.HostREStr == "" {
-    fmt.Printf("Warning: No MI_HOSTPATT in environment or config !");
-  } // else { var err error = nil; fmt.Println(mic.HostRE) }
-  for {
-    //fmt.Println("Next ..."); // DEBUG
-    mi, err := it.Next()
-    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break }
-    if mi == nil { fmt.Println("No mi gotten in iteration. check (actual) creds, project etc."); break }
-    // NOTE: We are not deleting here, only classifying (w. interest in KEEP_WD, DEL_1W)
-    //var cl int = mic.Classify(mi)
-    // Drop old images form being considered
-    //NOT-LOW: t, _ := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), mic.Tloc)
-    agehrs := mic.AgeHours(mi)
-    if agehrs > float64(mic.KeepMaxH) { fmt.Printf("Too old\n"); continue; }
-    if (mic.HostRE != nil) {
-      m := mic.HostRE.FindStringSubmatch( mi.GetName() )
-      fmt.Printf("HOSTMatch: %v, MINAME: %s\n", m[1], mi.GetName() );
-    } // NumSubexp
-    // 
-
-    //if verbose { fmt.Println(verdict[cl]) }
-    // Weekday analysis
-    /*
-    if (cl == MIs.KEEP_WD) || (cl == MIs.DEL_1W) {
-      t, _ := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), mic.Tloc) // Def. UTC
-      wd := int(t.Weekday());
-      fmt.Printf("%s %s %s %s\n", mi.GetName(), mi.GetCreationTimestamp(), verdict[cl], wdnames[wd]) // 
-      if mic.Debug { fmt.Printf("%s %s (%d)\n", t.UTC(), t.UTC().Weekday(), int(t.UTC().Weekday()) ); } // DEBUG UTC()
-    }
-    */
-    //fmt.Printf("%s %s %s\n", mi.GetName(), mi.GetCreationTimestamp(), verdict[cl]) // wdnames[wd]
-    totcnt++
-  }
-  fmt.Printf("%d Images from %s\n", totcnt, mic.Project);
-}
 // Delete machine images per given config policy.
 // TODO: Possibly Convert to use getAll, except we want MIMI (not full computepb.MachineImage ents)
 func mi_del() { // pname string

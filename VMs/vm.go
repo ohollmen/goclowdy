@@ -63,6 +63,7 @@ func (cfg * CC) Init() error {
   //if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
   env.Set(cfg)
   if cfg.CredF != "" { os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF) }
+  //flag.Parse() // mic mems are bound, not vm
   var err error = nil
   cfg.c, err = compute.NewInstancesRESTClient(ctx)
   if err != nil { return err }

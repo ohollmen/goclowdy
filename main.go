@@ -1,14 +1,17 @@
 package main
+
 import (
-  "fmt"
-  "sync"
-  //"exec" // Old ? Also: "os/exec" https://stackoverflow.com/questions/6182369/exec-a-shell-command-in-go
-  "os/exec"
-  MIs "github.com/ohollmen/goclowdy/MIs"
-  "errors"
-  "encoding/json"
-  "os"
-  //"golang.org/x/exp/constraints" // go mod download golang.org/x/exp
+	"fmt"
+	"sync"
+
+	//"exec" // Old ? Also: "os/exec" https://stackoverflow.com/questions/6182369/exec-a-shell-command-in-go
+	"encoding/json"
+	"errors"
+	"os"
+	"os/exec"
+
+	MIs "github.com/ohollmen/goclowdy/MIs"
+	//"golang.org/x/exp/constraints" // go mod download golang.org/x/exp
 )
 var names2 = []string{"bu1","bu2","bu3","bu4","bu5","bu6","bu7","bu8","bu9","bu10","bu11","bu12","bu13","bu14","bu15","bu16",};
 
@@ -92,4 +95,20 @@ func config_load(fname string, mic * MIs.CC) error {
   if err != nil { return errors.New("Config Parsing failed: ") } // + string(err)
   //if mic.Debug { fmt.Printf("Config: %+v\n", mic); }
   return nil
+}
+
+func subarr_test() {
+  chunks := chunk(names2, 3);
+    //chunk(names2, 4);
+    //chunk(names2, 5);
+    //chunk(names2, 20);
+    for i, chunk := range chunks {
+      fmt.Printf("Chunk %d: %+v\n", i, chunk);
+      var wg sync.WaitGroup
+      for _, item := range chunk{
+        wg.Add(1)
+        go hello(item, &wg)
+      }
+      wg.Wait()
+    }
 }
