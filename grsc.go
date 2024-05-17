@@ -64,12 +64,12 @@ import (
 	"golang.org/x/exp/slices" // 1.21 has this built-in
 )
 
-var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME"}
+var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME", "KEEP (MID-TERM MONTHLY)"}
 var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME", "MI_CHUNK_DEL_SIZE"}
 var wdnames = []string{"SUN","MON","TUE","WED","THU","FRI","SAT"}
 // Default MI client config
-// 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat)
-var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 5, KeepMinH: 168,  KeepMaxH: (24 * (365 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
+// 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat). KeepMaxH (days) 365 => 548 (18 m)
+var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 6, MD_keep: 1, KeepMinH: 168,  KeepMaxH: (24 * (548 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
 var bindpara MIs.CC = MIs.CC{}
 // Machine image mini-info. Allow deletion to utilize this (for reporting output). Add creation time ?
 type MIMI struct {
@@ -210,7 +210,7 @@ func env_ls() {
     fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n\n", jb)
     if mic.NameRE != nil { fmt.Printf(" MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
 }
-// Backup VMs froma GCP Project
+// Backup VMs from a GCP Project
 func vm_backup() {
   // Need vmc and mic
   // vmc ...
@@ -301,6 +301,8 @@ func vm_ls() { // pname string
 }
 // New MI List with statistical count of MIs per time eras (now...1w, 1w...1y).
 // Mix of access to VMs (find all) and MIs (See: vm_ls() for "ingredients" of solution)
+// The mic.HostREStr must be a pattern that captures the hostname part from the machine image as capture group 1
+// e.g. export MI_HOSTPATT='^(\w+-\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3})'
 func mi_list() {
   //ctx := context.Background()
   //////// VMs //////////
@@ -323,13 +325,15 @@ func mi_list() {
   all := mic.GetAll()
   // Because we collect stats by hostname, the pattern to match must be there !
   if mic.HostREStr == "" { fmt.Printf("Warning: No HostREStr in environment (MI_HOSTPATT) or config !"); return; }
-  if mic.HostRE == nil   { fmt.Printf("Warning: No HostRE pattern matecher !"); return; }
+  if mic.HostRE == nil   { fmt.Printf("Warning: No HostRE pattern matcher (RE syntax error ?) !"); return; }
   totcnt := 0 // TODO: More diverse stats
   secnt := mic.HostRE.NumSubexp()
   fmt.Printf("Subexpressions: %d\n", secnt);
   for _, mi := range all {
     totcnt++
-    agehrs := mic.AgeHours(mi)
+    t, err := mic.CtimeUTC(mi)
+    if err != nil { fmt.Printf("MI C-TS not parsed !"); continue; }
+    agehrs := mic.AgeHours2(t)
     if agehrs > float64(mic.KeepMaxH) { fmt.Printf("Too old\n"); continue; }
     if (mic.HostRE != nil) {
       m := mic.HostRE.FindStringSubmatch( mi.GetName() )
@@ -368,7 +372,7 @@ func mi_del() { // pname string
   //config_load("", &mic); // Already on top
   
   rc := mic.Init()
-  if rc != 0 {fmt.Printf("MI Clinet Init() failed: %d (%+v)\n", rc, &mic);  }
+  if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic);  }
   fmt.Printf("Config (after init): %+v\n", &mic);
   if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
   // Classification stats. Note: no wrapping make() needed w. element initialization
@@ -396,7 +400,11 @@ func mi_del() { // pname string
     if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break }
     if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break }
     /////// Actual processing ////////
-    if verbose { fmt.Println("MI:"+mi.GetName()+" (Created: "+mi.GetCreationTimestamp()+")") }
+    // NEW: Use discovered UTC C-TS
+    t, err := mic.CtimeUTC(mi)
+    if err != nil { fmt.Println("Create-time not parsed !");break; }
+    // OLD: mi.GetCreationTimestamp()
+    if verbose { fmt.Println("MI:"+mi.GetName()+" (Created: "+t.Format(time.RFC3339)+" "+wdnames[t.Weekday()]+")") } //  
     var cl int = mic.Classify(mi)
     if verbose { fmt.Println(verdict[cl]) }
     miclstat[cl]++

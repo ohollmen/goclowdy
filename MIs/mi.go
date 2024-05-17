@@ -27,6 +27,7 @@ type CC struct {
   CredF string    `env:"GOOGLE_APPLICATION_CREDENTIALS"`
   TZn string      `env:"GCP_CLOCK_TZN"`
   WD_keep int
+  MD_keep int
   KeepMinH int // dur_keep_all => KeepMinH
   KeepMaxH int
   // Priv
@@ -38,7 +39,7 @@ type CC struct {
   c * compute.MachineImagesClient
   DelOK bool       `env:"MI_DELETE_EXEC"`
   Debug bool
-  NameREStr string `env:"MI_STDNAME"`
+  NameREStr string `env:"MI_STDNAME"` // Standard name RE
   NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
   HostREStr string `env:"MI_HOSTPATT"`
   HostRE * regexp.Regexp
@@ -55,6 +56,7 @@ const (
   DEL_1W  = 3 // In intermediate time, not WD_keep
   DEL_OLD  = 4 // Older than KeepMaxH
   KEEP_CUSTOM = 5 // Custom named MI
+  KEEP_MD = 6 // Day of the month
 )
 
 func (cfg * CC) Client() * compute.MachineImagesClient {
@@ -95,8 +97,10 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
   //}
   // Default to UTC
   if cfg.TZn == "" { cfg.TZn = "Europe/London" }
-  cfg.Tloc, _ = time.LoadLocation(cfg.TZn)
-  cfg.tnow = time.Now() // Now=Local
+  cfg.Tloc, err = time.LoadLocation(cfg.TZn)
+  if err != nil { fmt.Println("Error Loading time.Location !"); return 1 }
+  //cfg.tnow = time.Now() // Now=Local
+  cfg.tnow = time.Now().UTC()
   // Note/Investigate: Setting G_A_C here is effective, but not in Validate() !?
   os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF)
   // Init client ?
@@ -106,7 +110,7 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
   if cfg.StorLoc == "" { cfg.StorLoc = "us"; }
   // Good Defaults for KeepMinH, KeepMaxH
   if cfg.KeepMinH < 1 { cfg.KeepMinH = 168; }
-  if cfg.KeepMaxH < 1 { cfg.KeepMaxH = (24 * (365 + 7)); }
+  if cfg.KeepMaxH < 1 { cfg.KeepMaxH = (24 * (548 + 7)); }
   // Naming
   // https://pkg.go.dev/regexp
   //var stdnamere * regexp.Regexp // Regexp
@@ -130,27 +134,52 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
 }
 
 func (cfg * CC) AgeHours(mi * computepb.MachineImage) float64 { // int ?
+  // See elaboration in Classify
   t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
+  // t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp()).UTC()
   if err != nil { return -1; }
   nd := cfg.tnow.Sub(t) // Duration/Age
   return nd.Hours(); // cast int ? round ?
 }
 
-func (cfg * CC) Classify(mi * computepb.MachineImage) int {
-  t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc) // Def. UTC
+func (cfg * CC) AgeHours2(t  time.Time) float64 { // int ?
+  // See elaboration in Classify
+  //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
+  // t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp()).UTC()
+  //if err != nil { return -1; }
   nd := cfg.tnow.Sub(t) // Duration/Age
+  return nd.Hours() // cast int ? round ?
+}
+
+func (cfg * CC)CtimeUTC(mi * computepb.MachineImage) (time.Time, error) {
+  //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
+  t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp());
+  if err != nil { return t, err; }
+  t = t.UTC()
+  return t, nil;
+}
+func (cfg * CC) Classify(mi * computepb.MachineImage) int {
+  // Since GCP TS always has TZ spec, drop cfg.Tloc (not effecive) and call time.Parse(...).UTC()
+  //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc) // Def. UTC
+  //t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp())
+  t, err := cfg.CtimeUTC(mi)
   if err != nil { return KEEP_SAFE; }
-  hrs := nd.Hours()
+  //ALREADY:t = t.UTC()
+  //time.Time; time.Location; t.Lo
+  //nd := cfg.tnow.Sub(t) // subtract (now-t) for Duration/Age
+  //hrs := nd.Hours()
+  hrs := cfg.AgeHours2(t) // TODO !!! (Need above for err or check for ret'd -1 / err ?)
+  //if hrs < 0 { return KEEP_SAFE; } // T-Parse error in AgeHours()
   // NEW: Non-std Naming
-  if (cfg.NameRE != nil) && (!cfg.NameRE.MatchString( mi.GetName() )) { return KEEP_CUSTOM; }
-  // NEW: Use cfg.KeepMaxH (OLD: (24 * (365 + 7)))
+  //if (cfg.NameRE != nil) && (!cfg.NameRE.MatchString( mi.GetName() )) { return KEEP_CUSTOM; }
+  // NEW: Use cfg.KeepMaxH (OLD: (24 * (365 + 7))). 
   if hrs > float64(cfg.KeepMaxH) { return DEL_OLD; } // fmt.Println("DEL "); // Need float64() ?
   // Less than MAX period (e.g. 1Y+1W) old ... but
   // Test for always keep-period
   // float64
   if hrs < float64(cfg.KeepMinH) {  return KEEP_NEW; } // fmt.Println("KEEP (new, < week old)");
   if cfg.WD_keep == int(t.Weekday()) {  return KEEP_WD; } // fmt.Println("KEEP correct day");
-  
+  if cfg.MD_keep == int(t.Day()) {  return KEEP_MD; } // Day of the month
   //fmt.Println(nd)
   return DEL_1W
 }
