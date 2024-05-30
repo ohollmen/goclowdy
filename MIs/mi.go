@@ -25,23 +25,22 @@ import (
 type CC struct {
   Project string  `env:"GCP_PROJECT"`
   CredF string    `env:"GOOGLE_APPLICATION_CREDENTIALS"`
-  TZn string      `env:"GCP_CLOCK_TZN"`
+  //TZn string      `env:"GCP_CLOCK_TZN"`
   WD_keep int
   MD_keep int
   KeepMinH int // dur_keep_all => KeepMinH
   KeepMaxH int
-  // Priv
-  tnow time.Time
-  Tloc * time.Location
-  StorLoc string
-  //tnow Time
+  // Note: Priv
+  tnow time.Time // Time (at start of process(ing)) to share within an action
+  //Tloc * time.Location
+  StorLoc string // e.g. zone or "us"
   // ctx !!
   c * compute.MachineImagesClient
   DelOK bool       `env:"MI_DELETE_EXEC"`
   Debug bool
-  NameREStr string `env:"MI_STDNAME"` // Standard name RE
+  NameREStr string `env:"MI_STDNAME"` // MI Standard name RE
   NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
-  HostREStr string `env:"MI_HOSTPATT"`
+  HostREStr string `env:"MI_HOSTPATT"` // Hostname capture from MI name (should have 2 cap.parens 1sh: hostname, 2nd: date)
   HostRE * regexp.Regexp
   ChunkDelSize int  `env:"MI_CHUNK_DEL_SIZE"`
   WorkerLimit int
@@ -58,15 +57,18 @@ const (
   KEEP_CUSTOM = 5 // Custom named MI
   KEEP_MD = 6 // Day of the month
 )
-
+const (TAKE_NONE uint8 = 0; TAKE_DAILY = 1; TAKE_WEEKLY = 2; TAKE_MONTHLY = 4)
 func (cfg * CC) Client() * compute.MachineImagesClient {
   return cfg.c
+}
+func (cfg * CC) Tnow() time.Time {
+  return cfg.tnow;
 }
 // Apply non-empty env. vars to config members.
 func (cfg * CC) EnvMerge() {
   if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
   if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" { cfg.CredF = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") }
-  if os.Getenv("GCP_CLOCK_TZN") != "" { cfg.TZn = os.Getenv("GCP_CLOCK_TZN") }
+  // if os.Getenv("GCP_CLOCK_TZN") != "" { cfg.TZn = os.Getenv("GCP_CLOCK_TZN") }
   if os.Getenv("MI_STDNAME") != "" { cfg.NameREStr = os.Getenv("MI_STDNAME") }
   if os.Getenv("MI_CHUNK_DEL_SIZE") != "" { cfg.ChunkDelSize, _ = strconv.Atoi( os.Getenv("MI_CHUNK_DEL_SIZE") ); }
   if os.Getenv("MI_DELETE_EXEC") != "" { cfg.DelOK = true; } // Any non-empty
@@ -84,7 +86,7 @@ func (cfg * CC) Validate() error {
 // Cons: time.ParseDuration("10s") from https://go.dev/blog/package-names
 func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch after env
   ctx := context.Background()
-  //cfg.EnvMerge()
+  //cfg.EnvMerge() // explicit implementation
   // Note: This (w. `env:...` tags seems to handle the type conversions (even bool value 0)
   err := env.Set(cfg)
   if err != nil { fmt.Println("Error setting config mems from env !"); return 1  }
@@ -95,11 +97,11 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
   //  if clpara["project"]  != "" { cfg.Project = clpara["project"]; }
   //  if clpara["appcreds"] != "" { cfg.CredF = clpara["appcreds"]; } // CredF
   //}
-  // Default to UTC
-  if cfg.TZn == "" { cfg.TZn = "Europe/London" }
-  cfg.Tloc, err = time.LoadLocation(cfg.TZn)
-  if err != nil { fmt.Println("Error Loading time.Location !"); return 1 }
-  //cfg.tnow = time.Now() // Now=Local
+  // NEW: Default to UTC
+  //if cfg.TZn == "" { cfg.TZn = "Europe/London" }
+  //cfg.Tloc, err = time.LoadLocation(cfg.TZn)
+  //if err != nil { fmt.Println("Error Loading time.Location !"); return 1 }
+  //cfg.tnow = time.Now() // Now=Local OLD
   cfg.tnow = time.Now().UTC()
   // Note/Investigate: Setting G_A_C here is effective, but not in Validate() !?
   os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", cfg.CredF)
@@ -132,16 +134,18 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
   if err != nil { fmt.Println("Config Validation Failed. Please check your JSON config, Environment vars and CL params."); return 1 }
   return 0
 }
-
-func (cfg * CC) AgeHours(mi * computepb.MachineImage) float64 { // int ?
+// Legacy ParseInLocation way of detecting age.
+func (cfg * CC) AgeHoursXX(mi * computepb.MachineImage) float64 { // int ?
   // See elaboration in Classify
-  t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
-  // t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp()).UTC()
+  fmt.Println("WARNING: Using legacy Location based Age computation !!!")
+  //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
+  t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp())
+  t = t.UTC()
   if err != nil { return -1; }
   nd := cfg.tnow.Sub(t) // Duration/Age
   return nd.Hours(); // cast int ? round ?
 }
-
+// New way of computing age. Call CtimeUTC to get started, call this with results.
 func (cfg * CC) AgeHours2(t  time.Time) float64 { // int ?
   // See elaboration in Classify
   //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
@@ -150,7 +154,8 @@ func (cfg * CC) AgeHours2(t  time.Time) float64 { // int ?
   nd := cfg.tnow.Sub(t) // Duration/Age
   return nd.Hours() // cast int ? round ?
 }
-
+// Create UTC time.Time (no zone) from MI CreationTimestamp (which always has explicit TZ).
+// After parsing time.Time gets convertede to UTC (w. no TZ).
 func (cfg * CC)CtimeUTC(mi * computepb.MachineImage) (time.Time, error) {
   //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
   t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp());
@@ -158,12 +163,13 @@ func (cfg * CC)CtimeUTC(mi * computepb.MachineImage) (time.Time, error) {
   t = t.UTC()
   return t, nil;
 }
+// Classify an MI for keep / delete (and the classifying reason for it).
 func (cfg * CC) Classify(mi * computepb.MachineImage) int {
   // Since GCP TS always has TZ spec, drop cfg.Tloc (not effecive) and call time.Parse(...).UTC()
   //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc) // Def. UTC
   //t, err := time.Parse(time.RFC3339, mi.GetCreationTimestamp())
   t, err := cfg.CtimeUTC(mi)
-  if err != nil { return KEEP_SAFE; }
+  if err != nil { return KEEP_SAFE; } // Parse error (play safe, KEEP)
   //ALREADY:t = t.UTC()
   //time.Time; time.Location; t.Lo
   //nd := cfg.tnow.Sub(t) // subtract (now-t) for Duration/Age
@@ -177,24 +183,48 @@ func (cfg * CC) Classify(mi * computepb.MachineImage) int {
   // Less than MAX period (e.g. 1Y+1W) old ... but
   // Test for always keep-period
   // float64
-  if hrs < float64(cfg.KeepMinH) {  return KEEP_NEW; } // fmt.Println("KEEP (new, < week old)");
+  if hrs < float64(cfg.KeepMinH)     {  return KEEP_NEW; } // fmt.Println("KEEP (new, < week old)");
   if cfg.WD_keep == int(t.Weekday()) {  return KEEP_WD; } // fmt.Println("KEEP correct day");
-  if cfg.MD_keep == int(t.Day()) {  return KEEP_MD; } // Day of the month
+  if cfg.MD_keep == int(t.Day())     {  return KEEP_MD; } // Day of the month
   //fmt.Println(nd)
   return DEL_1W
 }
 
-// To delete .. based on keep-classification.
+// To delete .. based on keep-classification. All DEL_* enums should be included here.
 func ToBeDeleted(cl int) bool {
-  if (cl == DEL_1W) || (cl == DEL_OLD) { return true }
+  if (cl == DEL_1W) || (cl == DEL_OLD) { return true } // All DEL_* enums
   return false
 }
 
-// Old sign: mi * computepb.MachineImage
+// Figure out which kinds machine images to take (daily=1,weekly=2,monthly=4 to pack 3 bits into an uint) for current day.
+// Use the const enums to test the results (e.g.):
+// ```
+// totake := mic.MIsToTake()
+// if totake | TAKE_WEEKLY { ... do weekly ... }
+// ````
+func (cfg * CC) MIsToTake(t * time.Time) uint8 { // t * time.Time ?
+  if t == nil { t = &cfg.tnow; } // time.Now().UTC()
+  var totake uint8 = TAKE_DAILY; // Always
+  if cfg.WD_keep == int(t.Weekday()) { totake |= TAKE_WEEKLY; }
+  if cfg.MD_keep == int(t.Day())     { totake |= TAKE_MONTHLY; }
+  return totake;
+}
+// Convert totake-bits to slice of timeunit-suffixes to use for MI creation.
+func BitsToTimesuffix(bits uint8) []string {
+  sfs := []string{}
+  //bvs := [uint8]{1,2,4}
+  //for _, bv := range bvs { if bv{} }
+  if (bits & 1) > 0 { sfs = append(sfs, "daily"); }
+  if (bits & 2) > 0 { sfs = append(sfs, "weekly"); }
+  if (bits & 4) > 0 { sfs = append(sfs, "monthly"); }
+  return sfs
+}
+
+// Delete a MI (passed by name, in the project of mic-client).
 // Alt way:
 // delimg := computeService.MachineImages.Delete(projid, miname)
 // _, err := delimg.Do()
-//func (cfg * CC) Delete(mi * computepb.MachineImage) error { // , c * compute.MachineImagesClient
+//OLD: func (cfg * CC) Delete(mi * computepb.MachineImage) error { ... now kep more loosely coupled (by name)
 func (cfg * CC) Delete(miname string) error {
   ctx := context.Background()
   fmt.Println("Should delete "+ miname); // mi.GetName()
@@ -211,19 +241,25 @@ func (cfg * CC) Delete(miname string) error {
   fmt.Println("Success deleting MI: ", miname) // mi.GetName()
   return nil
 }
-
-// inst * computepb.Instance (Instead of mini, make variadic ?)
-// OLD: mini * string
-// options: force is in effect by cfg.DelOK
-func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { // , cfg * CC c * compute.MachineImagesClient
+// Prefix time (as ISO date) to existing suffi in a "MI name friedly" way (Using '-')
+func (cfg * CC) DatePrefix(suff string, t * time.Time ) string {
+  if t == nil { t = &cfg.tnow; }
+  if suff == "" { return t.Format("2006-01-02"); }
+  return t.Format("2006-01-02") + "-" + suff
+}
+// Create MI from a VM (passed as param) with optional custom name suffix.
+// Default MI name will be VM name with "-" + ISO date
+// inst * computepb.Instance (Instead of mini * string, make variadic ?)
+// options: force is in effect by cfg.DelOK. If mic.Wg (work group) is set, auto-defers mic.Wg.Done()
+func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error {
   
   var storageLocation []string
   storageLocation = append(storageLocation, cfg.StorLoc) // "us"
   var imgname string
   // Figure out MI name
-  if altsuff == "" { imgname = StdName(inst.GetName())
+  if altsuff == "" { imgname = StdName(inst.GetName()) // Create STD name HN + "-" + ISO
   } else { imgname = inst.GetName() + "-" + altsuff }
-  if cfg.Debug { fmt.Printf("MI name to use: %s, storloc: %s\n", imgname, storageLocation[0]); }
+  if cfg.Debug { fmt.Printf("MI name to use: '%s', storloc: '%s'\n", imgname, storageLocation[0]); }
   if cfg.Wg != nil { fmt.Printf("Got Wg - defer...\n"); defer cfg.Wg.Done(); }
   // Check existing. This is good no matter what for clarity and possibly avoiding creation call
   mi := cfg.GetOne(imgname)   // , cfg.c
@@ -256,7 +292,7 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error { //
     },
   }
   // Do we need to share exact context with the caller ? A: No need to do that.
-  ctx := context.Background()
+  ctx := context.Background() // DO we have to use shared context, e.g. mic.Ctx OR mic.?
   op, err := cfg.c.Insert(ctx, req)
   // instancename := inst.GetName() // mini
   if err != nil {
