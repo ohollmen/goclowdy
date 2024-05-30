@@ -9,7 +9,9 @@
 //
 // ## Building
 // ```
-// go build grsc.go
+// #NOT:go build grsc.go
+// go build
+// # Look for binary goclowdy
 // ```
 // Resources:
 // - https://ueokande.github.io/go-slice-tricks/
@@ -35,6 +37,7 @@ import (
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
 	//goc "VMs"
 	//macv "MIs"
+	GPs "github.com/ohollmen/goclowdy/GPs"
 	MIs "github.com/ohollmen/goclowdy/MIs"
 	VMs "github.com/ohollmen/goclowdy/VMs"
 
@@ -69,7 +72,7 @@ var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_
 var wdnames = []string{"SUN","MON","TUE","WED","THU","FRI","SAT"}
 // Default MI client config
 // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat). KeepMaxH (days) 365 => 548 (18 m)
-var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 6, MD_keep: 1, KeepMinH: 168,  KeepMaxH: (24 * (548 + 7)), TZn: "Europe/London"} // tnow: tnow, tloc: loc
+var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 6, MD_keep: 1, KeepMinH: 168,  KeepMaxH: (24 * (548 + 7)), } // tnow: tnow, tloc: loc TZn: "Europe/London"
 var bindpara MIs.CC = MIs.CC{}
 // Machine image mini-info. Allow deletion to utilize this (for reporting output). Add creation time ?
 type MIMI struct {
@@ -96,6 +99,8 @@ var scomms = []SubComm{
   {"subarr",   "Subarray Test", subarr_test},
   {"milist",   "List Machine Images (With time stats)", mi_list},
   {"vmbackup", "Backup VMs from a project", vm_backup},
+  {"projlist", "List projects", proj_list},
+  {"projsvmbackup", "List Projects and VMs", projsvmbackup},
   //{"","",},//{"","",},
 
 }
@@ -121,7 +126,9 @@ func args_subcmd() string {
   if mic.Debug { fmt.Printf("Args: %v\n", os.Args) }
   return op;
 }
-// 
+
+var Filter = ""
+
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
 func args_bind() { // clpara map[string]string
@@ -132,6 +139,7 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&mic.Project, "project", "", "GCP Cloud project (string) id")
   flag.StringVar(&mic.CredF,   "appcreds", "", "GCP Cloud Application Credentials (string)")
   flag.BoolVar(&mic.Debug,     "debug", false, "Set debug mode.")
+  flag.StringVar(&Filter,      "filter", "", "Filter for Project Operations")
   //flag.IntVar(p *int, name string, value int, usage string)
 
   // This does not work based on Go dangling pointer-policies
@@ -208,8 +216,9 @@ func env_ls() {
     //fmt.Printf("XXXX Project=%s\n", project)
     jb, _ = json.MarshalIndent(&mic, "", "  ")
     fmt.Printf("# Config as JSON (After config load and Init()):\n%s\n\n", jb)
-    if mic.NameRE != nil { fmt.Printf(" MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
+    if mic.NameRE != nil { fmt.Printf("# MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
 }
+
 // Backup VMs from a GCP Project
 func vm_backup() {
   // Need vmc and mic
@@ -228,7 +237,7 @@ func vm_backup() {
   fmt.Printf("mic Project: %s\n", mic.Project);
   
   all := vmc.GetAll() //; fmt.Println(all)
-  // Filter the superset "all". Note: Improve/extend initial slim / narrow VM name based fitering implementation
+  // Filter the superset "all" (e.g. "apache.*"). Note: Improve/extend initial slim / narrow VM name based fitering implementation
   namepatt := os.Getenv("GCP_VM_NAMEPATT") // TODO: param from ...
   if namepatt != "" {
     fmt.Printf("Got namepatt (GCP_VM_NAMEPATT): %s\n", namepatt)
@@ -241,7 +250,7 @@ func vm_backup() {
     all = ftd
   }
   icnt := len(all)
-  if icnt == 0 { fmt.Println("No VMs found"); return }
+  if icnt == 0 { fmt.Println("No VMs found (after filtering)"); return }
   
   fmt.Printf("%d VMs to backup\n", icnt);
   mic.Debug = true
@@ -249,24 +258,39 @@ func vm_backup() {
   //return;
   // Iterate VM:s
   var wg sync.WaitGroup
-  mic.Wg = &wg
+  mic.Wg = &wg // Set as shared (ptr)
+  //namesuffbase := mic.DatePrefix("testsuffix", nil) // mic.Tnow().Format("2006-01-02")+"-testsuffix" // Appended to name, should be e.g. ISO date + "-" + daily/weekly/monthly
+  //namesuffbase = "testsuffix"
+  //fmt.Println("Use name suffix "+namesuffbase); return; 
   // Initially: all listed in VM-to-backup: ..., but only 3 or 4 show "MI name to use: ..." see: 
+  // 
   cb := func(vm *computepb.Instance) {
     //defer wg.Done()
-    go mic.CreateFrom(vm, "testsuffix")
+    // go - NOT needed here if stated before
+    totake := mic.MIsToTake(nil) // 1..3
+    if totake > 0 { fmt.Printf("Take (bitwise): %d\n", totake); }
+    sarr   := MIs.BitsToTimesuffix(totake)
+    wg.Add(len(sarr)) // if wg
+    for _, suffitem := range sarr {
+      namesuffbase := mic.DatePrefix(suffitem, nil)
+      go mic.CreateFrom(vm, namesuffbase)
+    }
   }
+  // Note: Match wg.Add(1) / wg.Done()
   for _, vm := range all{ // Instance
-    wg.Add(1) // if wg
+    
     fmt.Println("VM-to-backup: ", vm.GetName()) // if mc.Debug
+    
     //go cb(item, icfg.Userdata);
     // 2nd: altsuff ... will be appended staring w. '-'
-    go cb(vm) // mic.CreateFrom(vm, "testsuffix")
-    //wg.Done() // if wg
+    //go
+    cb(vm) // mic.CreateFrom(vm, "testsuffix")
+    //wg.Done() // if wg. NOTE here, but at the end of goroutine task completion
 
   }
-  mic.Wg = nil // Set null for client reuse
+  fmt.Println("Done w. launching. Starting to wait ...");
   wg.Wait()
-  
+  mic.Wg = nil // Set null for client reuse (ONLY after Wait)
 }
 // List VMs. Set GCP_PROJECT and GOOGLE_APPLICATION_CREDENTIALS as needed (or get from config)
 func vm_ls() { // pname string
@@ -534,4 +558,37 @@ func key_list() {
     fmt.Printf("%v Exp.: %s\n", path.Base(key.Name), key.ValidBeforeTime)
   }
   // Also: SignJwtRequest, but: https://cloud.google.com/iam/docs/migrating-to-credentials-api
+}
+
+func proj_list()  { // error ?
+  flag.Parse()
+  //fmt.Printf("Got Filter: %s\n", Filter);
+  //var qmap = map[string]string{} // {"include": "true"}
+  qmap := GPs.KvParse(Filter)
+  qstr := GPs.Map2Query(qmap)
+  if qstr != "" { fmt.Printf("Query: %s\n", qstr); }
+  Projects := GPs.ProjectsList(qstr)
+  fmt.Printf("# %d Projects retrieved by filter: '%s'\n", len(Projects), qstr)
+  // Filter ?
+  for _, project := range Projects {
+    // fmt.Printf("%s =>\n%v\n", project.ProjectId, *project)
+    fmt.Printf("%s\n", project.ProjectId)
+  }
+  return
+}
+// E.g. 352 => 60 (5s)
+func projsvmbackup() {
+  flag.Parse()
+  qmap := GPs.KvParse(Filter)
+  qstr := GPs.Map2Query(qmap)
+  //qstr := "" // "labels.include=true"
+  var vmc VMs.CC = VMs.CC{Project: ""} // CredF: ""
+  err := vmc.Init();
+  if err != nil { fmt.Printf("No vmc !"); return; }
+  Projects := GPs.ProjectsList(qstr)
+  if Projects == nil { fmt.Printf("No Projects Listed"); return; }
+  pvms := GPs.ProjectsVMs(Projects, vmc)
+  for _, pvm := range pvms {
+    fmt.Printf("  - VM: %s/%s\n", pvm.Project.ProjectId, pvm.Vm.GetName());
+  }
 }
