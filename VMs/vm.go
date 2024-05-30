@@ -80,6 +80,7 @@ func (cfg * CC) GetAll() []*computepb.Instance { // ctx context.Context,
   //c, _ := compute.NewInstancesRESTClient(ctx)
   //if c == nil { fmt.Println("Req not created"); return vm_all }
   //defer c.Close() // Could be still in use
+  // See also: cs = compute.NewService(ctx); cs.Instances.AggregatedList(project.ProjectId) ( .Filter().PageToken().Do() )
   req := &computepb.AggregatedListInstancesRequest{ Project: cfg.Project, MaxResults: proto.Uint32(1000), }
   if req == nil { fmt.Println("Req not created"); return vm_all }
   it := cfg.c.AggregatedList(ctx, req)
