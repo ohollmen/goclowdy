@@ -126,8 +126,9 @@ func args_subcmd() string {
   if mic.Debug { fmt.Printf("Args: %v\n", os.Args) }
   return op;
 }
-
+// CL Params as package-global scalars
 var Filter = ""
+var Suffix = ""
 
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
@@ -139,7 +140,8 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&mic.Project, "project", "", "GCP Cloud project (string) id")
   flag.StringVar(&mic.CredF,   "appcreds", "", "GCP Cloud Application Credentials (string)")
   flag.BoolVar(&mic.Debug,     "debug", false, "Set debug mode.")
-  flag.StringVar(&Filter,      "filter", "", "Filter for Project Operations")
+  flag.StringVar(&Filter,      "filter", "", "Label Filter for Project Operations")
+  flag.StringVar(&Suffix,      "suffix", "", "Additional Suffix for Machine image (after vmname + IS date)")
   //flag.IntVar(p *int, name string, value int, usage string)
 
   // This does not work based on Go dangling pointer-policies

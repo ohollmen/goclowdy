@@ -36,10 +36,10 @@ Config file supports following config variables (for MIs):
 - Debug - Increase verbosity for runtime messages (default: false)
 - NameREStr - Machine image "standard name" REgExp String (default: none, must be valid RE). If pattern is set, **only the machine images
   that match this pattern will be considered for deletion (MI:s that do not are always kept).
-  When this string is empty / not present, filtering 
-- HostREStr - Machine image name pattern with 2 RE capture groups (i.e. "(...)...(...)" ) for deriving:
-  - what VM MI belongs to
-  - when the MI was created (ISO time)
+  When this string is empty / not present, filtering and classification by "standard name" is disabled.
+- HostREStr - Machine image name patterns with hostname and creation time RE capture groups (i.e. "(...)...(...)" ) for capturing / deriving:
+  - hostname capture  -> what VM MI belongs to
+  - creation time capture -> when the MI was created (ISO time, optional capture, this is more accurately reflected by mi.GetCreationTimestamp())
 - Machine image Retention time config vars (all times given as **hours**):
   - KeepMinH - Keep minumum time (all MIs below this age get kept, default: 168 hrs => 7 days/1 week)
   - KeepMaxH - Keep maximum time (all MIs above this age get deleted, default: 133320 hrs => 78(+) weeks)
