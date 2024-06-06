@@ -242,7 +242,8 @@ func (cfg * CC) Delete(miname string) error {
   fmt.Println("Success deleting MI: ", miname) // mi.GetName()
   return nil
 }
-// Prefix time (as ISO date) to existing suffi in a "MI name friedly" way (Using '-')
+// Prefix time (as ISO date) to existing suffix in a "MI name friedly" way (Using '-').
+// The value returned from here should be usable as-is for MI creation by CreateFrom().
 func (cfg * CC) DatePrefix(suff string, t * time.Time ) string {
   if t == nil { t = &cfg.tnow; }
   if suff == "" { return t.Format("2006-01-02"); }
@@ -283,6 +284,7 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string, Project st
   //defer cfg.c.Close()
   var UseProject string = VMs.VMProj(inst)
   if UseProject == "" { UseProject = Project; }
+  //if UseProject == "" { return errors.New("CreateFrom() error: No project (form VM or passed as call param)"); } // Error ?
   req := &computepb.InsertMachineImageRequest{
     Project: UseProject, // cfg.Project,
     SourceInstance: &instance_path,

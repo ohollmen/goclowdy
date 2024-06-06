@@ -98,8 +98,8 @@ var scomms = []SubComm{
   {"env",      "List goclowdy (utility) config and environment", env_ls},
   {"subarr",   "Subarray Test", subarr_test},
   {"milist",   "List Machine Images (With time stats)", mi_list},
-  {"vmbackup", "Backup VMs from a project", vm_backup},
-  {"projlist", "List projects", proj_list},
+  {"vmbackup", "Backup VMs from a project (Use overriding --project and --suffix as needed)", vm_backup},
+  {"projlist", "List projects (in org)", proj_list},
   {"projsvmbackup", "List Projects and VMs", projsvmbackup},
   //{"","",},//{"","",},
 
@@ -127,9 +127,10 @@ func args_subcmd() string {
   return op;
 }
 // CL Params as package-global scalars
+// var Project = ""
 var Filter = ""
 var Suffix = ""
-
+var Prefix = "" // for e.g. projlist
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
 func args_bind() { // clpara map[string]string
@@ -142,6 +143,7 @@ func args_bind() { // clpara map[string]string
   flag.BoolVar(&mic.Debug,     "debug", false, "Set debug mode.")
   flag.StringVar(&Filter,      "filter", "", "Label Filter for Project Operations")
   flag.StringVar(&Suffix,      "suffix", "", "Additional Suffix for Machine image (after vmname + IS date)")
+  flag.StringVar(&Prefix,      "prefix", "", "Prefix (string) to use for projects listing (e.g. --prefix '    - ' for YAML list)")
   //flag.IntVar(p *int, name string, value int, usage string)
 
   // This does not work based on Go dangling pointer-policies
@@ -233,6 +235,8 @@ func vm_backup() {
   flag.Parse()
   vmc.Project = mic.Project;
   fmt.Printf("vmc Project: %s\n", vmc.Project);
+  // Consider the --suffix passed from the command line
+  if Suffix != "" { fmt.Printf("Overriding suffix for the MI backup(ws): %s\n", Suffix); }
   // mic ...
   rc := mic.Init()
   if rc != 0 { fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
@@ -261,9 +265,9 @@ func vm_backup() {
   // Iterate VM:s
   var wg sync.WaitGroup
   mic.Wg = &wg // Set as shared (ptr)
-  //namesuffbase := mic.DatePrefix("testsuffix", nil) // mic.Tnow().Format("2006-01-02")+"-testsuffix" // Appended to name, should be e.g. ISO date + "-" + daily/weekly/monthly
+  namesuffbase := mic.DatePrefix(Suffix, nil) // mic.Tnow().Format("2006-01-02")+"-testsuffix" // Appended to name, should be e.g. ISO date + "-" + daily/weekly/monthly
   //namesuffbase = "testsuffix"
-  //fmt.Println("Use name suffix "+namesuffbase); return; 
+  fmt.Println("Use name suffix (refined): "+namesuffbase); // return; 
   // Initially: all listed in VM-to-backup: ..., but only 3 or 4 show "MI name to use: ..." see: 
   totake := mic.MIsToTake(nil) // 1..3
   if totake > 0 { fmt.Printf("Take (bitwise): %d\n", totake); }
@@ -273,9 +277,14 @@ func vm_backup() {
     // go - NOT needed here if stated before
     wg.Add(len(sarr)) // if wg
     for _, suffitem := range sarr {
-      namesuffbase := mic.DatePrefix(suffitem, nil)
-      go mic.CreateFrom(vm, namesuffbase, "")
+      namesuffbase_t := mic.DatePrefix(suffitem, nil)
+      go mic.CreateFrom(vm, namesuffbase_t, "")
     }
+  }
+  // Do a simple / single backup with suffix passed from CLI
+  cb_simple := func(vm *computepb.Instance) {
+    wg.Add(1)
+    go mic.CreateFrom(vm, namesuffbase, "")
   }
   // Note: Match wg.Add(1) / wg.Done()
   for _, vm := range all{ // Instance
@@ -284,9 +293,12 @@ func vm_backup() {
     
     //go cb(item, icfg.Userdata);
     // 2nd: altsuff ... will be appended staring w. '-'
-    //go
-    cb(vm) // mic.CreateFrom(vm, "testsuffix")
-    //wg.Done() // if wg. NOTE here, but at the end of goroutine task completion
+    //go // Not needed here
+    if Suffix != "" { cb_simple(vm)
+    } else {
+      cb(vm) // mic.CreateFrom(vm, "testsuffix")
+    }
+    //wg.Done() // if wg (?) NOT here, but at the end of goroutine task completion
 
   }
   fmt.Println("Done w. launching. Starting to wait ...");
@@ -573,6 +585,7 @@ func proj_list()  { // error ?
   // Filter ?
   for _, project := range Projects {
     // fmt.Printf("%s =>\n%v\n", project.ProjectId, *project)
+    if Prefix != "" { fmt.Print(Prefix); }
     fmt.Printf("%s\n", project.ProjectId)
   }
   return
