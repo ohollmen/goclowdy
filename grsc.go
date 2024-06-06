@@ -265,17 +265,16 @@ func vm_backup() {
   //namesuffbase = "testsuffix"
   //fmt.Println("Use name suffix "+namesuffbase); return; 
   // Initially: all listed in VM-to-backup: ..., but only 3 or 4 show "MI name to use: ..." see: 
-  // 
+  totake := mic.MIsToTake(nil) // 1..3
+  if totake > 0 { fmt.Printf("Take (bitwise): %d\n", totake); }
+  sarr   := MIs.BitsToTimesuffix(totake) // suffix array
   cb := func(vm *computepb.Instance) {
     //defer wg.Done()
     // go - NOT needed here if stated before
-    totake := mic.MIsToTake(nil) // 1..3
-    if totake > 0 { fmt.Printf("Take (bitwise): %d\n", totake); }
-    sarr   := MIs.BitsToTimesuffix(totake)
     wg.Add(len(sarr)) // if wg
     for _, suffitem := range sarr {
       namesuffbase := mic.DatePrefix(suffitem, nil)
-      go mic.CreateFrom(vm, namesuffbase)
+      go mic.CreateFrom(vm, namesuffbase, "")
     }
   }
   // Note: Match wg.Add(1) / wg.Done()

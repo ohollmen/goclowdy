@@ -44,7 +44,8 @@ func ProjectsList(qstr string) []*cloudresourcemanager.Project {
   if plist != nil && len(plist.Projects) == 0 { fmt.Println("No projects found");return nil }
   var projlist []*cloudresourcemanager.Project
   for _, project := range plist.Projects {
-    //fmt.Printf("Got project %s =>\n%v\n", project.ProjectId, nil)
+    //  =>\n%v
+    //fmt.Printf("Got project %s\n", project.ProjectId) // , nil
     projlist = append(projlist, project)
   }
   //fmt.Printf("Got %d projects\n", len(projlist))
@@ -56,6 +57,7 @@ func ProjectsVMs(Projects []*cloudresourcemanager.Project, vmc VMs.CC) []ProjVM 
   for _, project := range Projects {
     vmc.Project = project.ProjectId
     vms := vmc.GetAll()
+    if vms == nil { fmt.Println("No VMs from "+vmc.Project) }
     for _, vm := range vms {
       //fmt.Printf("  - VM: %s/%s\n", project.ProjectId, vm.GetName());
       pvms = append(pvms, ProjVM{Project: project, Vm: vm})

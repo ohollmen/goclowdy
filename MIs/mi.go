@@ -19,6 +19,7 @@ import (
 	"flag"
 
 	"github.com/codingconcepts/env"
+	"github.com/ohollmen/goclowdy/VMs"
 )
 
 // Machine Image Client Config
@@ -251,7 +252,7 @@ func (cfg * CC) DatePrefix(suff string, t * time.Time ) string {
 // Default MI name will be VM name with "-" + ISO date
 // inst * computepb.Instance (Instead of mini * string, make variadic ?)
 // options: force is in effect by cfg.DelOK. If mic.Wg (work group) is set, auto-defers mic.Wg.Done()
-func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error {
+func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string, Project string) error { // Project string
   
   var storageLocation []string
   storageLocation = append(storageLocation, cfg.StorLoc) // "us"
@@ -280,8 +281,10 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string) error {
   // This would imply a full re-instantiation / re-config of client
   // Likely because client is established in the orig. func scope.
   //defer cfg.c.Close()
+  var UseProject string = VMs.VMProj(inst)
+  if UseProject == "" { UseProject = Project; }
   req := &computepb.InsertMachineImageRequest{
-    Project: cfg.Project,
+    Project: UseProject, // cfg.Project,
     SourceInstance: &instance_path,
     MachineImageResource: &computepb.MachineImage{
       Name: &imgname,

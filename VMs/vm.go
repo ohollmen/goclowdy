@@ -1,6 +1,7 @@
 package VMs
 
 import (
+	"errors"
 	"os"
 
 	compute "cloud.google.com/go/compute/apiv1"
@@ -66,7 +67,7 @@ func (cfg * CC) Init() error {
   //flag.Parse() // mic mems are bound, not vm
   var err error = nil
   cfg.c, err = compute.NewInstancesRESTClient(ctx)
-  if err != nil { return err }
+  if err != nil { return errors.New("Problems creating compute instance client: "+err.Error()) }
   return nil
 }
 func (cfg * CC) GetAll() []*computepb.Instance { // ctx context.Context,
