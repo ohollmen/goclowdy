@@ -92,12 +92,13 @@ type SubComm struct {
   // opts []string
 }
 var scomms = []SubComm{
-  {"vm_mi_list", "VM list", vm_ls}, // Machine image
-  {"midel",      "Delete Machine images", mi_del},
+  {"vmlist",   "VM list", vm_ls}, // OLD: Machine image / vm_mi_list
+  {"midel",    "Delete Machine images", mi_del},
   {"keylist",  "List SA Keys from a GCP Project", key_list},
   {"env",      "List goclowdy (utility) config and environment", env_ls},
   {"subarr",   "Subarray Test", subarr_test},
-  {"milist",   "List Machine Images (With time stats)", mi_list},
+  {"mitstats",   "List Machine Images (With time stats)", mi_time_stats},
+  {"milist",   "List Machine Images", mi_list2},
   {"vmbackup", "Backup VMs from a project (Use overriding --project and --suffix as needed)", vm_backup},
   {"projlist", "List projects (in org)", proj_list},
   {"projsvmbackup", "List Projects and VMs", projsvmbackup},
@@ -128,6 +129,7 @@ func args_subcmd() string {
 }
 // CL Params as package-global scalars
 // var Project = ""
+// Generic name filter for various operations (e.g.: name patter of VM:s to back up)
 var Filter = ""
 var Suffix = ""
 var Prefix = "" // for e.g. projlist
@@ -141,7 +143,7 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&mic.Project, "project", "", "GCP Cloud project (string) id")
   flag.StringVar(&mic.CredF,   "appcreds", "", "GCP Cloud Application Credentials (string)")
   flag.BoolVar(&mic.Debug,     "debug", false, "Set debug mode.")
-  flag.StringVar(&Filter,      "filter", "", "Label Filter for Project Operations")
+  flag.StringVar(&Filter,      "filter", "", "Label Filter for Project/VM-MI Operations")
   flag.StringVar(&Suffix,      "suffix", "", "Additional Suffix for Machine image (after vmname + IS date)")
   flag.StringVar(&Prefix,      "prefix", "", "Prefix (string) to use for projects listing (e.g. --prefix '    - ' for YAML list)")
   //flag.IntVar(p *int, name string, value int, usage string)
@@ -204,10 +206,30 @@ func main() {
   config_load("", &mic);
   //NOT:args_override() // OLD: Worked on bindpara. Would need to call after mic.Init()
   idx := slices.IndexFunc(scomms, func(sc SubComm) bool { return sc.cmd == op })
+  if (idx > len(scomms)) || (idx < 0) { fmt.Printf("%s - No such subcomand (idx=%d)\n", op, idx); return; }
   scomms[idx].cb()
   return
 }
 
+func vmset_filter(all []*computepb.Instance, namepatt string) []*computepb.Instance {
+  
+  if namepatt == "" { return all; }
+  //if namepatt != "" {
+    var ftd []*computepb.Instance // New filtered array
+    fmt.Printf("Got namepatt (form GCP_VM_NAMEPATT or --filter): %s\n", namepatt)
+    NameRE, err := regexp.Compile(namepatt)
+
+    if err != nil { fmt.Printf("Error: namepatt (RE) not compiled: %s\n", err); return ftd; }
+    
+    for _, vm := range all { // FindStringSubmatch
+      if NameRE.FindString(vm.GetName()) != "" { ftd = append(ftd, vm); }
+    }
+    //all = ftd
+  //}
+  return ftd;
+}
+
+// SHow config (conf-file, env, CLI params merged)
 func env_ls() {
   fmt.Println("# The environment config:")
     for _, evar := range envcfgkeys { fmt.Println("export "+ evar+ "='"+ os.Getenv(evar)+ "'") }
@@ -241,20 +263,14 @@ func vm_backup() {
   rc := mic.Init()
   if rc != 0 { fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
   fmt.Printf("mic Project: %s\n", mic.Project);
-  
+  // TODO: Consider --filter from CLI (e.g. filter after getting all)
   all := vmc.GetAll() //; fmt.Println(all)
-  // Filter the superset "all" (e.g. "apache.*"). Note: Improve/extend initial slim / narrow VM name based fitering implementation
+  initcnt := len(all)
+  if initcnt < 1 { fmt.Printf("No VM:s gotten from project (%s)\n", vmc.Project); return }
+  // Filter down the superset "all" (e.g. by "apache.*"). Note: Improve/extend initial slim / narrow VM name based fitering implementation
   namepatt := os.Getenv("GCP_VM_NAMEPATT") // TODO: param from ...
-  if namepatt != "" {
-    fmt.Printf("Got namepatt (GCP_VM_NAMEPATT): %s\n", namepatt)
-    NameRE, err := regexp.Compile(namepatt)
-    if err != nil { fmt.Printf("namepatt (RE) not comiled: %s\n", err); return; }
-    var ftd []*computepb.Instance
-    for _, vm := range all { // FindStringSubmatch
-      if NameRE.FindString(vm.GetName()) != "" { ftd = append(ftd, vm); }
-    }
-    all = ftd
-  }
+  if Filter != "" { namepatt = Filter; }
+  all = vmset_filter(all, namepatt);
   icnt := len(all)
   if icnt == 0 { fmt.Println("No VMs found (after filtering)"); return }
   
@@ -272,7 +288,8 @@ func vm_backup() {
   totake := mic.MIsToTake(nil) // 1..3
   if totake > 0 { fmt.Printf("Take (bitwise): %d\n", totake); }
   sarr   := MIs.BitsToTimesuffix(totake) // suffix array
-  cb := func(vm *computepb.Instance) {
+  // N name-variants for each vm (based on sarr/suffix array => suffitem)
+  cb_multi := func(vm *computepb.Instance) {
     //defer wg.Done()
     // go - NOT needed here if stated before
     wg.Add(len(sarr)) // if wg
@@ -287,18 +304,22 @@ func vm_backup() {
     go mic.CreateFrom(vm, namesuffbase, "")
   }
   // Note: Match wg.Add(1) / wg.Done()
+  cb := cb_multi;
+  if Suffix != "" { cb = cb_simple; }
+  if (cb == nil) { return; }
+  // TODO: Set cb := if Suffix != "" { cb := cb_simple; } else { cb := cb_multi; }
   for _, vm := range all{ // Instance
     
     fmt.Println("VM-to-backup: ", vm.GetName()) // if mc.Debug
-    
-    //go cb(item, icfg.Userdata);
+    //go ... // Not needed here
+    cb(vm); // OLD: go cb(item, icfg.Userdata)
     // 2nd: altsuff ... will be appended staring w. '-'
-    //go // Not needed here
-    if Suffix != "" { cb_simple(vm)
-    } else {
-      cb(vm) // mic.CreateFrom(vm, "testsuffix")
-    }
-    //wg.Done() // if wg (?) NOT here, but at the end of goroutine task completion
+    // OLD:
+    //if Suffix != "" { cb_simple(vm)
+    //} else {
+    //  cb_multi(vm) // mic.CreateFrom(vm, "testsuffix")
+    //}
+    // NOT: wg.Done() // if wg (?) NOT here, but at the end of goroutine task completion
 
   }
   fmt.Println("Done w. launching. Starting to wait ...");
@@ -336,11 +357,26 @@ func vm_ls() { // pname string
     }
     return
 }
+
+func mi_list2() {
+  fmt.Printf("Proj: %s\n", mic.Project);
+  flag.Parse()
+  //vmc.Project = mic.Project;
+  //if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
+  //fmt.Printf("Proj: %s\n", vmc.Project);
+  rc := mic.Init()
+  if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
+  all := mic.GetAll()
+  for _, mi := range all {
+    fmt.Println(mi.GetName());
+  }
+}
 // New MI List with statistical count of MIs per time eras (now...1w, 1w...1y).
+//  Report Backup statistics per host (in current project).
 // Mix of access to VMs (find all) and MIs (See: vm_ls() for "ingredients" of solution)
 // The mic.HostREStr must be a pattern that captures the hostname part from the machine image as capture group 1
 // e.g. export MI_HOSTPATT='^(\w+-\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3})'
-func mi_list() {
+func mi_time_stats() {
   //ctx := context.Background()
   //////// VMs //////////
   fmt.Printf("Proj: %s\n", mic.Project);
@@ -354,40 +390,67 @@ func mi_list() {
   fmt.Printf("Proj: %s\n", vmc.Project);
   allvms := vmc.GetAll()
   if len(allvms) < 1 { fmt.Println("No VMs found"); return; }
-  stats := VMs.CreateStatMap(allvms)
+  stats := VMs.CreateStatMap(allvms) // Stats map - AT LEAST for tstats op/subcmd
   if vmc.Debug { fmt.Printf("%v %v", allvms, stats) }
   //////// MIs ///////////
   rc := mic.Init()
   if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
   all := mic.GetAll()
   // Because we collect stats by hostname, the pattern to match must be there !
+  // NOTE: We *could* use source VM of the MI, gotten from MI info (and discard the whole HostREStr / HostRE)
   if mic.HostREStr == "" { fmt.Printf("Warning: No HostREStr in environment (MI_HOSTPATT) or config !"); return; }
   if mic.HostRE == nil   { fmt.Printf("Warning: No HostRE pattern matcher (RE syntax error ?) !"); return; }
-  totcnt := 0 // TODO: More diverse stats
+  //totcnt := 0 // TODO: More diverse stats
   secnt := mic.HostRE.NumSubexp()
   fmt.Printf("Subexpressions: %d\n", secnt);
-  for _, mi := range all {
-    totcnt++
+  if (secnt < 1) { fmt.Printf("Error: There are no RE captures for VM name - must have min. 1 !"); return; }
+  // Gather stats by 1) correlating MI to a VM 2) Seeing if MI classifies as recent (<1week) or older (> 1week) - place this to stats of VM
+  // cb - Add to stats[]-map
+  cb := func(mi * computepb.MachineImage) { // mic MIs.CC
     t, err := mic.CtimeUTC(mi)
-    if err != nil { fmt.Printf("MI C-TS not parsed !"); continue; }
+    if err != nil { fmt.Printf("MI C-TS not parsed !"); return; }
     agehrs := mic.AgeHours2(t)
-    if agehrs > float64(mic.KeepMaxH) { fmt.Printf("Too old\n"); continue; }
-    if (mic.HostRE != nil) {
+    //if agehrs > float64(mic.KeepMaxH) { fmt.Printf("Too old\n"); continue; } // Do not discard, BUT ADD to stats
+    //if (mic.HostRE != nil) { // No need to check, has been checked much earlier !!!
       m := mic.HostRE.FindStringSubmatch( mi.GetName() )
-      if len(m) < 1 { fmt.Printf("No capture items for hostname matching (%s)\n", mi.GetName() ); continue; }
+      // NOTE: HostRE is likely to ONLY match Std. name pattern, so no-match may/will happen for all the ad-hoc backups.
+      if len(m) < 1 { fmt.Printf("No capture items for hostname matching (%s)\n", mi.GetName() ); return; }
       fmt.Printf("HOSTMatch: %v, MINAME: %s AGE: %f\n", m[1], mi.GetName(), agehrs );
       mis, ok := stats[m[1]] // MI stat. Is this copy or ref to original ? https://golang.cafe/blog/how-to-check-if-a-map-contains-a-key-in-go
       //if mis.Mincnt > 100 {} // Dummy
-      if !ok { fmt.Printf("No stats entry for captured VM name '%s'\n", m[1]); continue; }
+      if !ok { fmt.Printf("No stats entry for captured VM name '%s'\n", m[1]); return; }
       
       if agehrs <= float64(mic.KeepMinH)  { mis.Mincnt++; //stats[m[1]].Mincnt++
       } else if agehrs <= float64(mic.KeepMaxH) { mis.Maxcnt++ ; //stats[m[1]].Maxcnt++
-      } // else { mis.Mincnt++;  mis.Maxcnt++ } // Last: test/debug
-    } // NumSubexp
+      } else {   mis.Delcnt++ } // Last: test/debug mis.Mincnt++;
+    //}
+    return
   }
+  maxtime := false
+  cb2 := func(mi * computepb.MachineImage) {
+    t, err := mic.CtimeUTC(mi)
+    if err != nil { fmt.Printf("MI C-TS not parsed !"); return; }
+    agehrs := mic.AgeHours2(t)
+    if (agehrs > 1000000) { return; }
+    //
+  }
+  if maxtime { cb = cb2; }
+  for _, mi := range all {
+    //totcnt++
+    
+    cb(mi)
+  }
+  
   // The downside of having map value-struct as *pointer* is we see only mem-address in (raw Printf("%v", ...)) dump (!!!)
   //fmt.Printf("STATS: %v\n", stats)
-  // Report Backup statistics per host (in current project). TODO: Populate Struct for JSON
+  // Serialize/Sequentialize stats map to a slice/array (of per-vm stats) and the array further to JSON output.
+  //TODO:
+  
+  vmmi_tstats_out(stats)
+}
+
+ // Output MI Statistics per timespan (stored in a map[vmname]{MIStat})
+ func vmmi_tstats_out (stats map[string]*VMs.MIStat) {
   //var reparr []*VMs.MIStat // Empty/0-items, no pre-alloc
   reparr := make([]*VMs.MIStat, len(stats)) // Prealloc to right size (Use indexes)
   i := 0
@@ -397,12 +460,13 @@ func mi_list() {
     i++
   }
   jba, err := json.MarshalIndent(reparr, "", "  ") // ([]byte, error)
-
+  if err != nil { fmt.Println("Error JSON-serializing VMMI stats !"); return; }
   fmt.Printf("%s\n", jba) // Ok w. []byte
-  fmt.Printf("# %d Images from %s\n", totcnt, mic.Project);
-}
+  fmt.Fprintf(os.Stderr, "# %d Images from %s\n", len(reparr), mic.Project); //totcnt
+  }
 
 // Delete machine images per given config policy.
+// ONLY needs access to MIs (Uses mic).
 // TODO: Possibly Convert to use getAll, except we want MIMI (not full computepb.MachineImage ents)
 func mi_del() { // pname string
   ctx := context.Background()
@@ -434,21 +498,21 @@ func mi_del() { // pname string
   for {
     //fmt.Println("Next ...");
     mi, err := it.Next()
-    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break }
-    if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break }
+    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break } // At the end of normal iter. w. results
+    if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break } // No results (e.g. wrong creds)
     /////// Actual processing ////////
-    // NEW: Use discovered UTC C-TS
+    // NEW: Use discovered UTC C-TS (From client, shared)
     t, err := mic.CtimeUTC(mi)
     if err != nil { fmt.Println("Create-time not parsed !");break; }
     // OLD: mi.GetCreationTimestamp()
-    if verbose { fmt.Println("MI:"+mi.GetName()+" (Created: "+t.Format(time.RFC3339)+" "+wdnames[t.Weekday()]+")") } //  
+    if verbose { fmt.Println("MI:"+mi.GetName()+" (MICreated: "+t.Format(time.RFC3339)+" "+wdnames[t.Weekday()]+")") } // Now w. weekday
     var cl int = mic.Classify(mi)
     if verbose { fmt.Println(verdict[cl]) }
     miclstat[cl]++
     if MIs.ToBeDeleted(cl) {
       todel++
       if verbose { fmt.Printf("DELETE %s\n", mi.GetName()) } // Also in DRYRUN
-      mimi := MIMI{miname: mi.GetName(), class: cl}
+      mimi := MIMI{miname: mi.GetName(), class: cl} // Add time, WD ?
       // Store MI to list
       //delarr = append(delarr, mi) // OLD full mi
       delarr = append(delarr, mimi)

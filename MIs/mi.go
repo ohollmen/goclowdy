@@ -85,6 +85,7 @@ func (cfg * CC) Validate() error {
   return nil
 }
 // Cons: time.ParseDuration("10s") from https://go.dev/blog/package-names
+// TODO: Ret. error (update callers)
 func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch after env
   ctx := context.Background()
   //cfg.EnvMerge() // explicit implementation
@@ -132,9 +133,13 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
   }
   // 
   err = cfg.Validate()
-  if err != nil { fmt.Println("Config Validation Failed. Please check your JSON config, Environment vars and CL params."); return 1 }
+  if err != nil { fmt.Printf("Config Validation Failed. Please check your JSON config, Environment vars and CL params.: %s\n"); return 1 }
   return 0
 }
+// Get all MIs from project (similar to vmc.GetAll())
+// GetAll()
+
+
 // Legacy ParseInLocation way of detecting age.
 func (cfg * CC) AgeHoursXX(mi * computepb.MachineImage) float64 { // int ?
   // See elaboration in Classify

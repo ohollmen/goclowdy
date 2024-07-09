@@ -57,6 +57,7 @@ type MIStat struct {
   Hostname string // Add this to make this fit for final JSON reporting
   Mincnt int
   Maxcnt int
+  Delcnt int // To-Delete (older than max)
 }
 func (cfg * CC) Init() error {
   ctx := context.Background()
