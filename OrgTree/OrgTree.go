@@ -121,9 +121,27 @@ func (oload * OrgLoader) Projects( oe * OrgEnt ) []*OrgEnt {
   if oload.Debug { fmt.Printf("children(proj): %+v\n", children); }
   return children
 }
-// Process OrgEnt Tree with a callback (and user data)
+// Process OrgEnt Tree with a callback (and TODO: user data => Interface).
+// Callback can make a processing-related filtering decisions internally e.g. by only processing certain types:
+//     if (oe.Etype == "org") || (oe.Etype == "folder") { return; } // SKIP
+//     // ... continue processing
+// TODO: Add (generic) userdata (Interface ?) to orgnodecb
 func (oe * OrgEnt) Process(cb orgnodecb) {
-  
+  err := cb(oe)
+  if err != nil { fmt.Printf("Error processing node !"); return; } // Terminate traversal of this tree branch !
+  for _, oec := range oe.Children {
+    //err :=
+    oec.Process(cb)
+    //if err != nil { fmt.Printf("Error processing child-node !"); }
+  }
+  //if err != nil { return err; }
+  //return nil
+}
+// Test orgnodecb
+// Try out by root.Process(OrgTree.Dumpent)
+func Dumpent(oe * OrgEnt) error {
+  fmt.Printf("OE-DUMP: %s\n", oe);
+  return nil
 }
 /*
 func main() {

@@ -41,6 +41,8 @@ import (
 	MIs "github.com/ohollmen/goclowdy/MIs"
 	VMs "github.com/ohollmen/goclowdy/VMs"
 
+	OrgTree "github.com/ohollmen/goclowdy/OrgTree"
+
 	//"github.com/ohollmen/goclowdy"
 	//"goclowdy/vm/VMs"
 	//"goclowdy/mi/MIs"
@@ -102,7 +104,7 @@ var scomms = []SubComm{
   {"vmbackup", "Backup VMs from a project (Use overriding --project and --suffix as needed)", vm_backup},
   {"projlist", "List projects (in org)", proj_list},
   {"projsvmbackup", "List Projects and VMs", projsvmbackup},
-  //{"orgtree","Dump OrgTree as JSON", orgtree_dump},//{"","",},
+  {"orgtree","Dump OrgTree as JSON", orgtree_dump},//{"","",},
   //{"","",},//{"","",},
 
 }
@@ -671,19 +673,23 @@ func projsvmbackup() {
     fmt.Printf("  - VM: %s/%s\n", pvm.Project.ProjectId, pvm.Vm.GetName());
   }
 }
-/*
+
 func orgtree_dump() {
   oname := "my.org";
   oid := "007"
   if os.Getenv("ORGID") != "" { oid = os.Getenv("ORGID"); }
-  var oload = OrgLoader{};
+  var oload = OrgTree.OrgLoader{};
   oload.LoadInit()
   oload.Debug = true
-  root := NewOrgTree(oid, oname);
+  root := OrgTree.NewOrgTree(oid, oname);
   //fmt.Printf("Constructed Org, but skipping traverse\n"); return; // DEBUG
   oload.LoadOrgTree(root);
   dump, err := json.MarshalIndent(root, "", "  ")
   if err != nil { fmt.Printf("Error serializing to JSON: %s\n", err); }
-  fmt.Println(dump); // "Done main: %s\n", 
+  if dump == nil { return }
+  fmt.Printf("%s",dump); // "Done main: %s\n", 
+  //fmt.Println(" ",dump);
+  //root.Process(OrgTree.Dumpent)
+  return
 }
-*/
+
