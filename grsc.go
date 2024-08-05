@@ -689,7 +689,7 @@ func orgtree_dump() {
   if dump == nil { return }
   fmt.Printf("%s",dump); // "Done main: %s\n", 
   //fmt.Println(" ",dump);
-  //root.Process(OrgTree.Dumpent)
+  root.Process(OrgTree.Dumpent, nil)
   return
 }
 

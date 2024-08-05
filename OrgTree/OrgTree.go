@@ -25,13 +25,14 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-type orgnodecb func(oe * OrgEnt) error // , if Interface (userdata)
+type orgnodecb func(oe * OrgEnt, userdata * interface{}) error // , if Interface (userdata)
 
 type OrgEnt struct {
   Name  string `json:"name"`
   Id    string `json:"id"`    // Number on orgs and folders, letter-str on projects	
   Etype string `json:"etype"` // "organization", "folder", "project"
-  Children []*OrgEnt
+  Children []*OrgEnt `json:"children"`
+  Userdata * interface{}
 }
 // OrgLoader
 type OrgLoader struct {
@@ -126,20 +127,20 @@ func (oload * OrgLoader) Projects( oe * OrgEnt ) []*OrgEnt {
 //     if (oe.Etype == "org") || (oe.Etype == "folder") { return; } // SKIP
 //     // ... continue processing
 // TODO: Add (generic) userdata (Interface ?) to orgnodecb
-func (oe * OrgEnt) Process(cb orgnodecb) {
-  err := cb(oe)
+func (oe * OrgEnt) Process(cb orgnodecb, userdata * interface{}) {
+  err := cb(oe, userdata)
   if err != nil { fmt.Printf("Error processing node !"); return; } // Terminate traversal of this tree branch !
   for _, oec := range oe.Children {
     //err :=
-    oec.Process(cb)
+    oec.Process(cb, userdata)
     //if err != nil { fmt.Printf("Error processing child-node !"); }
   }
   //if err != nil { return err; }
   //return nil
 }
 // Test orgnodecb
-// Try out by root.Process(OrgTree.Dumpent)
-func Dumpent(oe * OrgEnt) error {
+// Try out by root.Process(OrgTree.Dumpent, nil) // userdata = nil
+func Dumpent(oe * OrgEnt, dummy * interface{}) error {
   fmt.Printf("OE-DUMP: %s\n", oe);
   return nil
 }
