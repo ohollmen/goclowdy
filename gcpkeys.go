@@ -12,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 
+	b64 "encoding/base64"
+
 	"google.golang.org/api/iam/v1"
 )
 
@@ -129,7 +131,8 @@ func key_gen() {
   urlpath := fmt.Sprintf("/v1/projects/%s/serviceAccounts/%s/keys:upload", ki.Project, ki.Email) // ki.PkeyId in resp.
   if urlpath == "" { return }
   pubkmsg := &PubKey{}
-  pubkmsg.Data = string(k_pub);
+  //pubkmsg.Data = string(k_pub)
+  pubkmsg.Data = b64.StdEncoding.EncodeToString(k_pub) // []byte(data)
   out, err := json.MarshalIndent(pubkmsg, "", "  ")
   if err != nil { fmt.Println("Error Serializing PubKey message\n"); return }
   //bearer := "Authorization: Bearer "+ ... // From gcloud auth print-access-token
@@ -138,7 +141,8 @@ func key_gen() {
   ior := bytes.NewReader(out)
   bt := os.Getenv("GCP_BT") // Bearer token
   if bt == "" { fmt.Printf("No Bearer token set by GCP_BT (acquire w. gcloud auth print-access-token)"); return; }
-  c := http.Client{}
+  c := &http.Client{}
+  //var DefaultClient = &Client{}
   req, err := http.NewRequest("POST", gserv + urlpath, ior); // (*Request, error)
   req.Header.Add("Content-Type", "application/json; charset=utf-8")
   req.Header.Add("Authorization", "Bearer "+bt)
@@ -148,7 +152,7 @@ func key_gen() {
   //resp, err := http.Post(gserv + urlpath, "application/json", ior) //   // &out is *[]byte
 
   if err != nil { fmt.Printf("Error submitting public key: %s\n", err); return; }
-  if resp.StatusCode != http.StatusOK { fmt.Printf("Bad StatusCode: %d\n", resp.StatusCode); return }
+  if resp.StatusCode != http.StatusOK { fmt.Printf("Bad StatusCode: %d\n", resp.StatusCode); return } // E.g. 400 / Bad Request
   if resp.ContentLength < 2 {fmt.Printf("No sufficient content from key POST (Got %db): %s\n", resp.ContentLength, err); return;  }
   defer resp.Body.Close()
   body, err := io.ReadAll(resp.Body)
