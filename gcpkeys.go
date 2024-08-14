@@ -90,6 +90,8 @@ func key_check() {
 	//fmt.Printf("%v\n", ki);
 	//err = json.Unmarshal(dat, ki)
 	//ki.ExpTime = resp.ValidBeforeTime;
+	// TODO: Make a better time-diff analysis of expiry, e.g. expired ... ago, will expire in ... hours / days.
+	//var t time.Time
 	fmt.Printf("Key ('%s') Expires: %s\n", ki.PkeyId, resp.ValidBeforeTime) // ki.ExpTime
 	return
 }
@@ -101,6 +103,7 @@ func key_check() {
 // - https://cloud.google.com/iam/docs/keys-upload#iam-service-accounts-upload-rest
 // Seems gcloud beta iam service-accounts keys upload public_key.pem does not have Go API equivalent (only HTTP POST)
 // NOTE: The generated openssl keypair is not initially tied to any identity. The privkey stays locall, pubkey is uploaded.
+// Because of the raw http API is in use, for now you have to issue command: `gcloud auth print-access-token` to acquire HTTP Authorization Bearer token.
 var openssl_tmpl = []string{"req", "-x509", "-nodes", "-newkey", "rsa:4096", "-days", "10", "-keyout", "/tmp/private_key.pem", "-out", "/tmp/public_key.pem", "-subj", "/CN=none"} // openssl ... $exp_d
 func key_gen() {
   // Use old key as "template" ?
@@ -129,11 +132,20 @@ func key_gen() {
   pubkmsg.Data = string(k_pub);
   out, err := json.MarshalIndent(pubkmsg, "", "  ")
   if err != nil { fmt.Println("Error Serializing PubKey message\n"); return }
-  //bearer := "Authorization: Bearer "+ ... // equiv of gcloud auth print-access-token
+  //bearer := "Authorization: Bearer "+ ... // From gcloud auth print-access-token
   // https://pkg.go.dev/net/http
-  fmt.Println("Send Pub to: %s:\n%s\n", urlpath, string(out) )
+  fmt.Printf("Send Pub to: %s:\n%s\n", urlpath, string(out) )
   ior := bytes.NewReader(out)
-  resp, err := http.Post(gserv + urlpath, "application/json", ior) //   // &out is *[]byte
+  bt := os.Getenv("GCP_BT") // Bearer token
+  if bt == "" { fmt.Printf("No Bearer token set by GCP_BT (acquire w. gcloud auth print-access-token)"); return; }
+  c := http.Client{}
+  req, err := http.NewRequest("POST", gserv + urlpath, ior); // (*Request, error)
+  req.Header.Add("Content-Type", "application/json; charset=utf-8")
+  req.Header.Add("Authorization", "Bearer "+bt)
+  resp, err := c.Do(req)
+  // Below is ONLY fit for simple requests with no heqaders
+  //resp, err := http.Post(gserv + urlpath, "application/json", ior) //   // &out is *[]byte
+
   if err != nil { fmt.Printf("Error submitting public key: %s\n", err); return; }
   if resp.ContentLength < 2 {fmt.Printf("No sufficient content from key POST (Got %db): %s\n", resp.ContentLength, err); return;  }
   if resp.StatusCode != http.StatusOK { fmt.Printf("StatusCode %d\n", resp.StatusCode); return }
