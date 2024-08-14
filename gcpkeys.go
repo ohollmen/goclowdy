@@ -142,13 +142,14 @@ func key_gen() {
   req, err := http.NewRequest("POST", gserv + urlpath, ior); // (*Request, error)
   req.Header.Add("Content-Type", "application/json; charset=utf-8")
   req.Header.Add("Authorization", "Bearer "+bt)
+  fmt.Println("Request:", req);
   resp, err := c.Do(req)
   // Below is ONLY fit for simple requests with no heqaders
   //resp, err := http.Post(gserv + urlpath, "application/json", ior) //   // &out is *[]byte
 
   if err != nil { fmt.Printf("Error submitting public key: %s\n", err); return; }
+  if resp.StatusCode != http.StatusOK { fmt.Printf("Bad StatusCode: %d\n", resp.StatusCode); return }
   if resp.ContentLength < 2 {fmt.Printf("No sufficient content from key POST (Got %db): %s\n", resp.ContentLength, err); return;  }
-  if resp.StatusCode != http.StatusOK { fmt.Printf("StatusCode %d\n", resp.StatusCode); return }
   defer resp.Body.Close()
   body, err := io.ReadAll(resp.Body)
   if err != nil {  fmt.Printf("Error reading resp body (with id)\n");return;  }
