@@ -18,7 +18,7 @@ import (
 )
 
 type KeyInfo struct {
-  TokenURI string `json="token_uri"` // Make this into a complete JWT struct (inc. even the mems that we do not care so much about)
+  TokenURI string `json:"token_uri"` // Make this into a complete JWT struct (inc. even the mems that we do not care so much about)
   Type    string  `json:"type"` // service_account
   PkeyId  string `json:"private_key_id"`
   PkeyPEM string `json:"private_key"`
