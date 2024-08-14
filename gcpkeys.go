@@ -153,7 +153,9 @@ func key_gen() {
 
   if err != nil { fmt.Printf("Error submitting public key: %s\n", err); return; }
   if resp.StatusCode != http.StatusOK { fmt.Printf("Bad StatusCode: %d\n", resp.StatusCode); return } // E.g. 400 / Bad Request or 401 / Unauthorized
-  if resp.ContentLength < 2 {fmt.Printf("No sufficient content from key POST (Got %db, Status: %d): %v\n", resp.ContentLength, resp.StatusCode, resp); return;  }
+  // ContentLength seems to always be -1
+  //if resp.ContentLength < 2 {fmt.Printf("No sufficient content from key POST (Got %db, Status: %d): %v\n", resp.ContentLength, resp.StatusCode, resp); return;  }
+  if resp.Uncompressed != true { fmt.Printf("Error: Discovered compressed body !\n"); return; }
   defer resp.Body.Close()
   body, err := io.ReadAll(resp.Body)
   if err != nil {  fmt.Printf("Error reading resp body (with id)\n");return;  }
