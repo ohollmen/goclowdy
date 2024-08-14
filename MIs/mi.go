@@ -27,6 +27,7 @@ type CC struct {
   Project string  `env:"GCP_PROJECT"`
   CredF string    `env:"GOOGLE_APPLICATION_CREDENTIALS"`
   //TZn string      `env:"GCP_CLOCK_TZN"`
+  // TODO: Keep these time constraints / ranges in sep. config
   WD_keep int
   MD_keep int
   KeepMinH int // dur_keep_all => KeepMinH
@@ -318,7 +319,39 @@ func (cfg * CC) CreateFrom(inst * computepb.Instance, altsuff string, Project st
   return nil
 }
 
-// OLD: , c * compute.MachineImagesClient
+// Create MIs from multiple VMs passed in a slice.
+// Accepts callback to function that handles the details of single backup. Also allows passing alternative suffix
+// Passing cb as nil triggers the default behavior and the backup is taken by (focus on interface and tasks/responsibilities):
+// 
+// cb_simple := func(vm *computepb.Instance, wg * sync.WaitGroup, altsuff string) {
+//  wg.Add(1) // cb must always add the number of tasks (goroutines) it launches (usually 1, but can be many)
+//  go mic.CreateFrom(vm, altsuff, "") // Run backup task
+// }
+func (mic * CC) CreateFromMany(all []*computepb.Instance, cb func(*computepb.Instance, * sync.WaitGroup, string), altsuff string) {
+  var wg sync.WaitGroup
+  mic.Wg = &wg // Set as shared wg on client (ptr). MI client is wg-aware
+  if altsuff == "" {  } // Use plain ISO date (from mic)
+  cb_simple := func(vm *computepb.Instance, wg * sync.WaitGroup, altsuff string) {
+    wg.Add(1)
+    go mic.CreateFrom(vm, altsuff, "") // OLD: namesuffbase
+  }
+  if cb == nil {  cb = cb_simple; }
+  for _, vm := range all{ // Instance
+    
+    fmt.Println("VM-to-backup: ", vm.GetName()) // if mc.Debug
+    //go ... // Not needed here
+    cb(vm, &wg, altsuff); // OLD: go cb(item, icfg.Userdata)
+    // NOT: wg.Done() // if wg (?) NOT here, but at the end of goroutine task completion
+  }
+  fmt.Println("Done w. launching. Starting to wait ...");
+  wg.Wait()
+  mic.Wg = nil // Set null for client reuse (ONLY after Wait)
+  return;
+}  
+
+
+// Get single MI by it's name  (from current project).
+// Can be also used for detecting that MI does not exist. NOTE: Prints "Error: 404" for a non-existing MI to stdout.
 func (cfg * CC) GetOne(in string) *computepb.MachineImage {
   ctx := context.Background()
   req := &computepb.GetMachineImageRequest{MachineImage: in, Project: cfg.Project}
@@ -328,7 +361,8 @@ func (cfg * CC) GetOne(in string) *computepb.MachineImage {
   if cfg.Debug {  fmt.Printf("Got mi: %s\n", mi.GetName() ); }
   return mi
 }
-// New do-it-all search. Client MUST be inited before.
+// Get all VMs in a Project. Client MUST be inited (e.g. w. Project name) before.
+// Return an array of MIs.
 func (mic * CC) GetAll() []*computepb.MachineImage {
   ctx := context.Background()
   var arr []*computepb.MachineImage  // MIMI

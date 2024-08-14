@@ -51,7 +51,8 @@ func ProjectsList(qstr string) []*cloudresourcemanager.Project {
   //fmt.Printf("Got %d projects\n", len(projlist))
   return  projlist
 }
-
+// Note: ProjVM entries retain a ref to the original VM
+// NOTE: GCP vm ent also contains project making (concept of) ProjVM redundant. Project extractable by VMs.VMProj() (from vm.GetSelfLink)
 func ProjectsVMs(Projects []*cloudresourcemanager.Project, vmc VMs.CC) []ProjVM {
   pvms := []ProjVM{}
   for _, project := range Projects {

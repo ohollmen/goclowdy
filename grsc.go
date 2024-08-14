@@ -50,9 +50,7 @@ import (
 	//VMs "goclowdy/vm"
 	//"goclowdy/VMs"
 	//"goclowdy/MIs"
-	"path" // Base
-
-	"google.golang.org/api/iam/v1"
+	// Base
 
 	// NEW
 	//"regexp" // responsibility moved to MIs
@@ -80,6 +78,7 @@ var bindpara MIs.CC = MIs.CC{}
 type MIMI struct {
   miname string
   class int
+  //ctime time.Time
 }
 // Subcommand callback (No params for now)
 type SCCB = func() //error
@@ -91,20 +90,27 @@ type SubComm struct {
   // TODO: Simple slice of paramname=paramtype mappings (how to bind struct mem - by reflection ?) ?
   // OR Introspect
   // For convention see: https://perldoc.perl.org/Getopt::Long (s=string,i=int,f=float,""=bool=>no value)
-  // opts []string
+  // optkeys []string // Opts the SubComm is interested in (mandatory / optional ?)
+  // opts map[string]:string // Populate a map of package (CLI para) globals ??
 }
+// Handlers for subcommands. These are called by top-level main entrypoint and should comply to
+// same signature (refactor handles hand-in-hand)
 var scomms = []SubComm{
-  {"vmlist",   "VM list", vm_ls}, // OLD: Machine image / vm_mi_list
-  {"midel",    "Delete Machine images", mi_del},
-  {"keylist",  "List SA Keys from a GCP Project", key_list},
-  {"env",      "List goclowdy (utility) config and environment", env_ls},
-  {"subarr",   "Subarray Test", subarr_test},
-  {"mitstats",   "List Machine Images (With time stats)", mi_time_stats},
-  {"milist",   "List Machine Images", mi_list2},
-  {"vmbackup", "Backup VMs from a project (Use overriding --project and --suffix as needed)", vm_backup},
-  {"projlist", "List projects (in org)", proj_list},
-  {"projsvmbackup", "List Projects and VMs", projsvmbackup},
-  {"orgtree","Dump OrgTree as JSON", orgtree_dump},//{"","",},
+  {"vmlist",    "VM list", vm_ls}, // OLD: Machine image / vm_mi_list
+  {"midel",     "Delete Machine images", mi_del},
+  {"keylist",   "List SA Keys from a GCP Project", key_list},
+  {"keycheck",   "Check SA Key given in Env. GOOGLE_APPLICATION_CREDENTIALS", key_check},
+  
+  {"key_gen",   "BETA: Renew / Generate new SA Key based on old key", key_gen},
+  {"env",       "List goclowdy (utility) config and environment", env_ls},
+  {"subarr",    "Subarray Test", subarr_test},
+  {"mitstats",  "List Machine Images (With time stats)", mi_time_stats},
+  {"milist",    "List Machine Images", mi_list2},
+  {"vmbackup",  "Backup VMs from a project (Use overriding --project and --suffix as needed)", vm_backup},
+  {"projlist",  "List projects (in org)", proj_list},
+  {"projsvmbackup", "List Projects and VMs (Use --filter to perform labels based filtering)", projsvmbackup},
+  {"orgtree",   "Dump OrgTree as JSON", orgtree_dump},
+  //{"","",},
   //{"","",},//{"","",},
 
 }
@@ -130,10 +136,12 @@ func args_subcmd() string {
   if mic.Debug { fmt.Printf("Args: %v\n", os.Args) }
   return op;
 }
-// CL Params as package-global scalars
+// CL Params as main-package-global scalars (for now keep these as scalars as maintaining these in particular packages has shown
+// to be difficult)
 // var Project = ""
 // Generic name filter for various operations (e.g.: name patter of VM:s to back up)
 var Filter = ""
+//var Labelfilter = ""
 var Suffix = ""
 var Prefix = "" // for e.g. projlist
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
@@ -146,7 +154,8 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&mic.Project, "project", "", "GCP Cloud project (string) id")
   flag.StringVar(&mic.CredF,   "appcreds", "", "GCP Cloud Application Credentials (string)")
   flag.BoolVar(&mic.Debug,     "debug", false, "Set debug mode.")
-  flag.StringVar(&Filter,      "filter", "", "Label Filter for Project/VM-MI Operations")
+  flag.StringVar(&Filter,      "filter", "", "Label Filter OR VM name filter for Project/VM-MI Operations")
+  //flag.StringVar(&Labelfilter,      "labelfilter", "", "Label Filter for Project/VM-MI Operations")
   flag.StringVar(&Suffix,      "suffix", "", "Additional Suffix for Machine image (after vmname + IS date)")
   flag.StringVar(&Prefix,      "prefix", "", "Prefix (string) to use for projects listing (e.g. --prefix '    - ' for YAML list)")
   //flag.IntVar(p *int, name string, value int, usage string)
@@ -196,7 +205,7 @@ func main() {
   
   if len(os.Args) < 2 { usage("Subcommand missing !"); return; } // fmt.Println("Pass one of subcommands: "+subcmds); return
   op := args_subcmd()
-  args_bind() // OLD: clpara. Bind here, call flag.Parse() later.
+  args_bind() // OLD: clpara. Bind here, call flag.Parse() later (In handlers).
   
   //flag.Parse() // os.Args[2:] From Args[2] onwards
   //fmt.Printf("CL-ARGS(map): %v\n", clpara);
@@ -206,33 +215,34 @@ func main() {
   //pname := os.Getenv("GCP_PROJECT")
   //if pname == "" { fmt.Println("No project indicated (by GCP_PROJECT)"); return }
   //if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") == "" { fmt.Println("No creds given by (by GOOGLE_APPLICATION_CREDENTIALS)"); return }
-  config_load("", &mic);
+  config_load("", &mic); // TODO: Pass all possible ents that may be populated ?
   //NOT:args_override() // OLD: Worked on bindpara. Would need to call after mic.Init()
   idx := slices.IndexFunc(scomms, func(sc SubComm) bool { return sc.cmd == op })
-  if (idx > len(scomms)) || (idx < 0) { fmt.Printf("%s - No such subcomand (idx=%d)\n", op, idx); return; }
+  if (idx > len(scomms)) || (idx < 0) { fmt.Printf("%s - No such subcommand (idx=%d)\n", op, idx); return; }
+  // Create item to pass the handler (copied + extended variant of discovered SubComm scomms[idx] ???)
+  // opnode := scomms[idx] /// ... and add props ?
+  // Run current/discovered subcommand. TODO: pass
   scomms[idx].cb()
   return
 }
 
+// Filter VMSet (passed as all) by name pattern string.
+// Return filtered array (if RE fails to compile, return empty set)
 func vmset_filter(all []*computepb.Instance, namepatt string) []*computepb.Instance {
-  
   if namepatt == "" { return all; }
-  //if namepatt != "" {
-    var ftd []*computepb.Instance // New filtered array
-    fmt.Printf("Got namepatt (form GCP_VM_NAMEPATT or --filter): %s\n", namepatt)
-    NameRE, err := regexp.Compile(namepatt)
+  var ftd []*computepb.Instance // New filtered array
+  fmt.Printf("Got namepatt (form GCP_VM_NAMEPATT or --filter): %s\n", namepatt)
+  NameRE, err := regexp.Compile(namepatt)
 
-    if err != nil { fmt.Printf("Error: namepatt (RE) not compiled: %s\n", err); return ftd; }
+  if err != nil { fmt.Printf("Error: namepatt (RE) not compiled: %s\n", err); return ftd; }
     
-    for _, vm := range all { // FindStringSubmatch
-      if NameRE.FindString(vm.GetName()) != "" { ftd = append(ftd, vm); }
-    }
-    //all = ftd
-  //}
+  for _, vm := range all { // FindStringSubmatch
+    if NameRE.FindString(vm.GetName()) != "" { ftd = append(ftd, vm); }
+  }
   return ftd;
 }
 
-// SHow config (conf-file, env, CLI params merged)
+// Show config (conf-file, env, CLI params merged)
 func env_ls() {
   fmt.Println("# The environment config:")
     for _, evar := range envcfgkeys { fmt.Println("export "+ evar+ "='"+ os.Getenv(evar)+ "'") }
@@ -248,7 +258,8 @@ func env_ls() {
     if mic.NameRE != nil { fmt.Printf("# MI-RE:\n# - As Str:  %s\n# - From RE: %s\n", mic.NameREStr, mic.NameRE); }
 }
 
-// Backup VMs from a GCP Project
+// Backup VMs from a (single) GCP Project.
+// Note here --filter does VM name based filtering (NOT ), --suffix works "normally"
 func vm_backup() {
   // Need vmc and mic
   // vmc ...
@@ -281,19 +292,19 @@ func vm_backup() {
   mic.Debug = true
   //fmt.Printf("# Got %v  Instances\n", icnt) // Initial ... (Filtering ...)
   //return;
-  // Iterate VM:s
-  var wg sync.WaitGroup
-  mic.Wg = &wg // Set as shared (ptr)
+  /////////////////// Backup VM:s ///////////////////
+  
+  // For simple scenario remains constant across all items
   namesuffbase := mic.DatePrefix(Suffix, nil) // mic.Tnow().Format("2006-01-02")+"-testsuffix" // Appended to name, should be e.g. ISO date + "-" + daily/weekly/monthly
   //namesuffbase = "testsuffix"
   fmt.Println("Use name suffix (refined): "+namesuffbase); // return; 
-  // Initially: all listed in VM-to-backup: ..., but only 3 or 4 show "MI name to use: ..." see: 
+  // Multi-backup: Initially: all listed in VM-to-backup: ..., but only 3 or 4 show "MI name to use: ..." see: 
   totake := mic.MIsToTake(nil) // 1..3
   if totake > 0 { fmt.Printf("Take (bitwise): %d\n", totake); }
   sarr   := MIs.BitsToTimesuffix(totake) // suffix array
-  // N name-variants for each vm (based on sarr/suffix array => suffitem)
-  cb_multi := func(vm *computepb.Instance) {
-    //defer wg.Done()
+  // N name-variants for each vm (based on sarr/suffix array => suffitem). Do not use constant-across-all-vms suffix (namesuffbase) here.
+  cb_multi := func(vm *computepb.Instance, wg * sync.WaitGroup, dummy string) {
+    //NOT: defer wg.Done() // Done in CreateFrom()
     // go - NOT needed here if stated before
     wg.Add(len(sarr)) // if wg
     for _, suffitem := range sarr {
@@ -302,32 +313,16 @@ func vm_backup() {
     }
   }
   // Do a simple / single backup with suffix passed from CLI
-  cb_simple := func(vm *computepb.Instance) {
+  cb_simple := func(vm *computepb.Instance, wg * sync.WaitGroup, altsuff string) {
     wg.Add(1)
-    go mic.CreateFrom(vm, namesuffbase, "")
+    go mic.CreateFrom(vm, altsuff, "") // OLD: namesuffbase
   }
   // Note: Match wg.Add(1) / wg.Done()
-  cb := cb_multi;
+  cb := cb_multi; // Default
   if Suffix != "" { cb = cb_simple; }
   if (cb == nil) { return; }
-  // TODO: Set cb := if Suffix != "" { cb := cb_simple; } else { cb := cb_multi; }
-  for _, vm := range all{ // Instance
-    
-    fmt.Println("VM-to-backup: ", vm.GetName()) // if mc.Debug
-    //go ... // Not needed here
-    cb(vm); // OLD: go cb(item, icfg.Userdata)
-    // 2nd: altsuff ... will be appended staring w. '-'
-    // OLD:
-    //if Suffix != "" { cb_simple(vm)
-    //} else {
-    //  cb_multi(vm) // mic.CreateFrom(vm, "testsuffix")
-    //}
-    // NOT: wg.Done() // if wg (?) NOT here, but at the end of goroutine task completion
-
-  }
-  fmt.Println("Done w. launching. Starting to wait ...");
-  wg.Wait()
-  mic.Wg = nil // Set null for client reuse (ONLY after Wait)
+  /////// Multi-VM backup client ///////////////
+  mic.CreateFromMany(all, cb, namesuffbase)
 }
 // List VMs. Set GCP_PROJECT and GOOGLE_APPLICATION_CREDENTIALS as needed (or get from config)
 func vm_ls() { // pname string
@@ -468,9 +463,13 @@ func mi_time_stats() {
   fmt.Fprintf(os.Stderr, "# %d Images from %s\n", len(reparr), mic.Project); //totcnt
   }
 
-// Delete machine images per given config policy.
+// Delete machine images per given config / policy (sourced from cfg or global defaults).
 // ONLY needs access to MIs (Uses mic).
-// TODO: Possibly Convert to use getAll, except we want MIMI (not full computepb.MachineImage ents)
+// TODO:
+// - Possibly Convert to use getAll, except we want MIMI (not full computepb.MachineImage ents)
+// - 3 pass: 1) Get items, 2) classify 3) delete
+// https://code.googlesource.com/gocloud/+/refs/tags/v0.101.1/compute/apiv1/machine_images_client.go
+// Old raw: //var delarr []*computepb.MachineImage // var item *computepb.MachineImage
 func mi_del() { // pname string
   ctx := context.Background()
   //config_load("", &mic); // Already on top
@@ -482,30 +481,25 @@ func mi_del() { // pname string
   // Classification stats. Note: no wrapping make() needed w. element initialization
   miclstat := map[int]int{0: 0, 1:0, 2:0, 3:0, 4:0, 5:0}
   //TEST: miclstat_out(mic, miclstat); return;
+  // TODO: if Project != "" { mic.Project = Project; }
+  if mic.Project == "" { fmt.Println("No Project scope available for deletion (from config, cli or env)"); return }
   var maxr uint32 = 500 // 20
-  if mic.Project == "" { fmt.Println("No Project passed"); return }
-  req := &computepb.ListMachineImagesRequest{
-    Project: mic.Project,
-    MaxResults: &maxr } // Filter: &mifilter } // 
+  req := &computepb.ListMachineImagesRequest{ Project: mic.Project, MaxResults: &maxr } // Filter: &mifilter } // 
   //fmt.Println("Search MI from: "+cfg.Project+", parse by: "+time.RFC3339)
   it := mic.Client().List(ctx, req)
   if it == nil { fmt.Println("No mi:s from "+mic.Project); return; }
-  // https://code.googlesource.com/gocloud/+/refs/tags/v0.101.1/compute/apiv1/machine_images_client.go
-  //var delarr []*computepb.MachineImage // var item *computepb.MachineImage
   var delarr []MIMI
   // Iterate MIs, check for need to del
-  totcnt := 0; todel := 0;
+  totcnt := 0; todel := 0; // TODO: elim todel (get from slice)
   verbose := true
-  
-  
   for {
     //fmt.Println("Next ...");
     mi, err := it.Next()
     if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break } // At the end of normal iter. w. results
     if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break } // No results (e.g. wrong creds)
     /////// Actual processing ////////
-    // NEW: Use discovered UTC C-TS (From client, shared)
-    t, err := mic.CtimeUTC(mi)
+    // NEW: Use discovered UTC C-TS (From client, shared). TODO: Add to mimi (in delarr) ?
+    t, err := mic.CtimeUTC(mi) // TODO: (later ?) to mimi.ctime
     if err != nil { fmt.Println("Create-time not parsed !");break; }
     // OLD: mi.GetCreationTimestamp()
     if verbose { fmt.Println("MI:"+mi.GetName()+" (MICreated: "+t.Format(time.RFC3339)+" "+wdnames[t.Weekday()]+")") } // Now w. weekday
@@ -516,6 +510,7 @@ func mi_del() { // pname string
       todel++
       if verbose { fmt.Printf("DELETE %s\n", mi.GetName()) } // Also in DRYRUN
       mimi := MIMI{miname: mi.GetName(), class: cl} // Add time, WD ?
+      // mimi.ctime = t
       // Store MI to list
       //delarr = append(delarr, mi) // OLD full mi
       delarr = append(delarr, mimi)
@@ -537,7 +532,10 @@ func mi_del() { // pname string
     mimilist_del_chunk(mic, delarr)
   }
 }
+// Delete MIs beyond max age
+func mi_del_max() {
 
+}
 func miclstat_out(mic MIs.CC, miclstat map[int]int) {
   // Need: .UTC(). ?
   fmt.Printf("MI Class (keep/delete reasoning) stats (%s, %s):\n", mic.Project, time.Now().Format("2006-01-02T15:04:05-0700")); // \n%+v\n", miclstat (raw dump)
@@ -604,41 +602,19 @@ func mimilist_del_chan(mic MIs.CC, delarr []MIMI) {
     
   }
   wg.Wait()
-  fmt.Printf("Channel based processing completed !\n");
+  fmt.Printf("Channel based processing completed !\n"); // of %d items, len(delarr)
 }
 func mic_delete_mi(mic * MIs.CC, mimi * MIMI) int { // mi *computepb.MachineImage
   err := mic.Delete(mimi.miname) // mi.GetName()
-  if err != nil {
-   fmt.Printf("Error Deleting MI: %s\n", mimi.miname) //  mi.GetName()
-   return 1
+  if err != nil { fmt.Printf("Error Deleting MI: %s\n", mimi.miname); return 1
   } else {
-   fmt.Printf("Deleted %s\n", mimi.miname) //  mi.GetName()
-   return 0
+   fmt.Printf("Deleted %s\n", mimi.miname); return 0
   }
   //fmt.Printf("Should have deleted %s. Set DelOK (MI_DELETE_EXEC) to actually delete.\n", mi.GetName())
   //return 0
 }
+// Orig key_list
 
-func key_list() {
-  ctx := context.Background()
-  iamService, err := iam.NewService(ctx)
-  if err != nil { fmt.Println("No Service: ", err); return }
-  var pname string = mic.Project
-  acct := os.Getenv("GCP_SA")
-  pname = os.Getenv("GCP_SA_PROJECT") // override
-  if acct == "" { fmt.Println("No GCP_SA"); return }
-  if pname == "" { fmt.Println("No GCP_SA_PROJECT"); return }
-  sapath := fmt.Sprintf( "projects/%s/serviceAccounts/%s", pname,  acct)
-  resp, err := iamService.Projects.ServiceAccounts.Keys.List(sapath).Context(ctx).Do()
-  if err != nil { fmt.Printf("No Keys %v\n", err); return }
-  //fmt.Println("Got:", resp) // iam.ListServiceAccountKeysResponse
-  fmt.Printf("%T\n", resp) // import "reflect" fmt.Println(reflect.TypeOf(tst))
-  for _, key := range resp.Keys {
-    fmt.Printf("%T\n", key) // iam.ServiceAccountKey
-    fmt.Printf("%v Exp.: %s\n", path.Base(key.Name), key.ValidBeforeTime)
-  }
-  // Also: SignJwtRequest, but: https://cloud.google.com/iam/docs/migrating-to-credentials-api
-}
 
 func proj_list()  { // error ?
   flag.Parse()
@@ -658,20 +634,37 @@ func proj_list()  { // error ?
   return
 }
 // E.g. 352 => 60 (5s)
+// Note: --filter here is for the labels and must be on CLI in format "labels.include=true"
+// See also: vm_backup
 func projsvmbackup() {
   flag.Parse()
   qmap := GPs.KvParse(Filter)
   qstr := GPs.Map2Query(qmap)
   //qstr := "" // "labels.include=true"
+  if Suffix != "" { fmt.Printf("Current suffix: %s\n", Suffix); }
   var vmc VMs.CC = VMs.CC{Project: ""} // CredF: ""
   err := vmc.Init();
-  if err != nil { fmt.Printf("No vmc !"); return; }
+  if err != nil { fmt.Printf("No vmc: %v\n", err); return; }
   Projects := GPs.ProjectsList(qstr)
   if Projects == nil { fmt.Printf("No Projects Listed"); return; }
   pvms := GPs.ProjectsVMs(Projects, vmc)
+  //mic := MIs.CC{Project: ""} // use module-global
+  mic.Init(); // MUST init (not inited yet)
+  tnow := mic.Tnow()
+  usesuff := mic.DatePrefix(Suffix,  &tnow ) // mic.tnow not directly accessible - use mic.Tnow(). time.Now().UTC()
+  fmt.Printf("It is now (UTC): %s. Another way: %s\n", mic.Tnow(),  (&tnow).Format("2006-01-02") );
+  fmt.Printf("Pass altsuff: '%s'\n", usesuff)
+  all := []*computepb.Instance{}
+  // Initially: list + append(all)
   for _, pvm := range pvms {
     fmt.Printf("  - VM: %s/%s\n", pvm.Project.ProjectId, pvm.Vm.GetName());
+    //err = mic.CreateFrom(pvm.Vm, usesuff, "")
+    //if err !=nil { fmt.Printf("Error Creating MI out of VM: '%s': %s\n", pvm.Vm.GetName(), err); continue; }
+    //fmt.Println("MI created w. suffix '%s' from VM '%s' successfully\n", usesuff, pvm.Vm.GetName())
+    all = append(all, pvm.Vm)
   }
+  // Backup (Bulk)
+  mic.CreateFromMany(all, nil, usesuff)
 }
 
 func orgtree_dump() {
@@ -687,7 +680,7 @@ func orgtree_dump() {
   dump, err := json.MarshalIndent(root, "", "  ")
   if err != nil { fmt.Printf("Error serializing to JSON: %s\n", err); }
   if dump == nil { return }
-  fmt.Printf("%s",dump); // "Done main: %s\n", 
+  fmt.Printf("%s\n",dump); // "Done main: %s\n", 
   //fmt.Println(" ",dump);
   root.Process(OrgTree.Dumpent, nil)
   return
