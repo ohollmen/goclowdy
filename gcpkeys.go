@@ -160,7 +160,7 @@ func key_gen() {
   body, err := io.ReadAll(resp.Body)
   if err != nil {  fmt.Printf("Error reading resp body (with id)\n");return;  }
   // Parse Response content to kur
-  kur := KeyUpResp{}
+  kur := &KeyUpResp{}
   err = json.Unmarshal(body, kur)
   if err != nil { fmt.Println("Failed to parse (PubKey upload) response: %s\n", err);return;  }
   id := filepath.Base(kur.Name)
