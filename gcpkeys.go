@@ -126,7 +126,7 @@ func key_gen() {
   fmt.Printf("priv:%s\npub: %s\n", k_priv, k_pub);
   // email should end w. .iam.gserviceaccount.com
   gserv := "https://iam.googleapis.com"
-  urlpath := fmt.Sprintf("%s/v1/projects/%s/serviceAccounts/%s/keys:upload", gserv, ki.Project, ki.Email) // ki.PkeyId in resp.
+  urlpath := fmt.Sprintf("/v1/projects/%s/serviceAccounts/%s/keys:upload", ki.Project, ki.Email) // ki.PkeyId in resp.
   if urlpath == "" { return }
   pubkmsg := &PubKey{}
   pubkmsg.Data = string(k_pub);
@@ -134,7 +134,7 @@ func key_gen() {
   if err != nil { fmt.Println("Error Serializing PubKey message\n"); return }
   //bearer := "Authorization: Bearer "+ ... // From gcloud auth print-access-token
   // https://pkg.go.dev/net/http
-  fmt.Printf("Send Pub to: %s:\n%s\n", urlpath, string(out) )
+  fmt.Printf("Send Pub to: '%s':\n%s\n", urlpath, string(out) )
   ior := bytes.NewReader(out)
   bt := os.Getenv("GCP_BT") // Bearer token
   if bt == "" { fmt.Printf("No Bearer token set by GCP_BT (acquire w. gcloud auth print-access-token)"); return; }
