@@ -13,8 +13,10 @@ import (
 	MIs "github.com/ohollmen/goclowdy/MIs"
 	//"golang.org/x/exp/constraints" // go mod download golang.org/x/exp
 )
+// Test array for "array-of-strings" chunking.
 var names2 = []string{"bu1","bu2","bu3","bu4","bu5","bu6","bu7","bu8","bu9","bu10","bu11","bu12","bu13","bu14","bu15","bu16",};
 
+// Chunk an array of strings (mostly for testing)
 // TODO: Generics: replace string w. T
 // https://go.dev/blog/intro-generics
 // Call by chunk[string](items, 10)
@@ -45,6 +47,8 @@ func chunk(items []string, sasize int) [][]string {
     //names3[0] = "buX"
 //fmt.Printf("Items: %+v\n", names2);
 
+// Chunk an array-of-MIMI items.
+// Used in "chunk-strategy" of dividing MIMI items for (deletion) processing.
 func chunk_mimi(items []MIMI, sasize int) [][]MIMI {
 	var chunks [][]MIMI
 	alen := len(items)
@@ -79,6 +83,7 @@ func hello(str string, wg *sync.WaitGroup) error {
   //}
   //cmd := exec.Command("ls")
 
+// Helper callback for chunk-based deletion (called for each item from mimilist_del_chunk() )
 func mic_delete_mi_wg(mic * MIs.CC, mimi * MIMI, wg *sync.WaitGroup) error {
   defer wg.Done()
   //fmt.Printf("SHOULD-DELETE: %s (%s)\n", mimi.miname, verdict[mimi.class]); return nil // Debug: Simulate no error
