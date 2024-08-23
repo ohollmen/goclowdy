@@ -152,7 +152,7 @@ func (cfg * CC) AgeHoursXX(mi * computepb.MachineImage) float64 { // int ?
   nd := cfg.tnow.Sub(t) // Duration/Age
   return nd.Hours(); // cast int ? round ?
 }
-// New way of computing age. Call CtimeUTC to get started, call this with results.
+// New way of computing age. Call mic.CtimeUTC(mi) to get started, call this with results.
 func (cfg * CC) AgeHours2(t  time.Time) float64 { // int ?
   // See elaboration in Classify
   //t, err := time.ParseInLocation(time.RFC3339, mi.GetCreationTimestamp(), cfg.Tloc)
