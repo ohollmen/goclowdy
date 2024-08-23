@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 
 	b64 "encoding/base64"
 
@@ -40,30 +41,60 @@ type KeyPolicy struct {
   Exphrs int
   Minleft int
 }
-func get_key_context(acct_p *string, pname_p *string) {
 
-}
+// N/A: See keyinfo_load
+//func get_key_context(acct_p *string, pname_p *string) {}
+
 // https://cloud.google.com/iam/docs/keys-list-get#go
 func key_list() {
 	ctx := context.Background()
 	iamService, err := iam.NewService(ctx)
 	if err != nil { fmt.Println("No Service: ", err);return}
-	var pname string = mic.Project
-	acct := os.Getenv("GCP_SA")
-	pname = os.Getenv("GCP_SA_PROJECT") // override
-	if acct == "" { fmt.Println("No Service account GCP_SA");return}
-	if pname == "" {fmt.Println("No GCP_SA_PROJECT"); return}
-	sapath := fmt.Sprintf("projects/%s/serviceAccounts/%s", pname, acct)
+	//ki := &KeyInfo{}
+	//if ki == nil { return }
+	//var pname string
+	//ki.Project = mic.Project
+	akfn := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    //if akfn == "" {fmt.Printf("SA Key file was not passed in env (GOOGLE_APPLICATION_CREDENTIALS)\n"); return}
+	// TODO: Sample existing:
+	ki := keyinfo_load(akfn)
+	//acct :=
+	//ki.Email = os.Getenv("GCP_SA")
+	//pname =
+	//ki.Project = os.Getenv("GCP_SA_PROJECT") // override
+	//if acct == "" { fmt.Println("No Service account GCP_SA");return}
+	//if pname == "" {fmt.Println("No GCP_SA_PROJECT"); return}
+
+	sapath := fmt.Sprintf("projects/%s/serviceAccounts/%s", ki.Project, ki.Email) // pname, acct
+	// Expired filter: "validBeforeTime<0d"
 	resp, err := iamService.Projects.ServiceAccounts.Keys.List(sapath).Context(ctx).Do()
 	if err != nil {fmt.Printf("No Keys Found: %v\n", err);return}
 	//fmt.Println("Got:", resp) // iam.ListServiceAccountKeysResponse
-	fmt.Printf("%T\n", resp) // import "reflect" fmt.Println(reflect.TypeOf(tst))
+	//fmt.Printf("%T\n", resp) // import "reflect" fmt.Println(reflect.TypeOf(tst)) // DEBUG
 	for _, key := range resp.Keys {
+		// TODO: Time dur here
 		fmt.Printf("%T\n", key) // iam.ServiceAccountKey
 		fmt.Printf("%v Exp.: %s\n", path.Base(key.Name), key.ValidBeforeTime)
 	}
 	// Also: SignJwtRequest, but: https://cloud.google.com/iam/docs/migrating-to-credentials-api
+	auth_token()
 }
+// Get access/auth token from gcloud auth print-access-token.
+// Make sure correct (sufficiently privileged) account is active (gcloud config get account --quiet)
+// Detect exit values !=0 => Output is not an auth token. See need for --quiet.
+// Return empty string on errors / available, valid (ready-to-use) key-string otherwise.
+// See also: https://stackoverflow.com/questions/72275338/get-access-token-for-a-google-cloud-service-account-in-golang
+func auth_token() string {
+  cmd := exec.Command("gcloud", "auth", "print-access-token") // "--quiet"
+  stdout, err := cmd.Output() // stdout (openssl does not output anything, only errors matter)
+  if err != nil { fmt.Println("gcloud error: ", err.Error()); return "" }
+  at := string(stdout);
+  at = strings.TrimSpace(at)
+  //fmt.Printf("Token: '%s'\n", at);
+  return at
+}
+
+// Load JWT Key info from a file given in akfn (auth key filename).
 func keyinfo_load(akfn string) *KeyInfo {
   _, err := os.Stat(akfn)
   if err != nil {fmt.Printf("SA Key file '%s' could not be found: %v\n", akfn, err); return nil}
@@ -77,8 +108,8 @@ func keyinfo_load(akfn string) *KeyInfo {
 // Check and verify the current key
 // https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts.keys/get
 func key_check() {
-	akfn := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-	if akfn == "" {fmt.Printf("SA Key file was not passed in env (GOOGLE_APPLICATION_CREDENTIALS)\n"); return}
+  akfn := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
+  if akfn == "" {fmt.Printf("SA Key file was not passed in env (GOOGLE_APPLICATION_CREDENTIALS)\n"); return}
 	ki := keyinfo_load(akfn) // Load ! fmt.Printf("loaded key\n");
 	fmt.Printf("Current key (id): %s\n", ki.PkeyId)
 	kpath := fmt.Sprintf("projects/%s/serviceAccounts/%s/keys/%s", ki.Project, ki.Email, ki.PkeyId)
@@ -106,6 +137,7 @@ func key_check() {
 // Seems gcloud beta iam service-accounts keys upload public_key.pem does not have Go API equivalent (only HTTP POST)
 // NOTE: The generated openssl keypair is not initially tied to any identity. The privkey stays locall, pubkey is uploaded.
 // Because of the raw http API is in use, for now you have to issue command: `gcloud auth print-access-token` to acquire HTTP Authorization Bearer token.
+// Note: This solution has slight downside (compared to gcloud) in requiring to launch gcloud auth print-access-token manually (set in env).
 var openssl_tmpl = []string{"req", "-x509", "-nodes", "-newkey", "rsa:4096", "-days", "10", "-keyout", "/tmp/private_key.pem", "-out", "/tmp/public_key.pem", "-subj", "/CN=none"} // openssl ... $exp_d
 func key_gen() {
   // Use old key as "template" ?
@@ -139,8 +171,9 @@ func key_gen() {
   // https://pkg.go.dev/net/http
   fmt.Printf("Send Pub to: '%s':\n%s\n", urlpath, string(out) )
   ior := bytes.NewReader(out)
-  bt := os.Getenv("GCP_BT") // Bearer token
-  if bt == "" { fmt.Printf("No Bearer token set by GCP_BT (acquire w. gcloud auth print-access-token)"); return; }
+  bt := auth_token()
+  if os.Getenv("GCP_BT") != "" { bt = os.Getenv("GCP_BT") }// Bearer token
+  if bt == "" { fmt.Printf("No Bearer token gotten from gcloud OR set by GCP_BT (acquire w. gcloud auth print-access-token)"); return; }
   c := &http.Client{}
   //var DefaultClient = &Client{}
   req, err := http.NewRequest("POST", gserv + urlpath, ior); // (*Request, error)
@@ -157,6 +190,7 @@ func key_gen() {
   //if resp.ContentLength < 2 {fmt.Printf("No sufficient content from key POST (Got %db, Status: %d): %v\n", resp.ContentLength, resp.StatusCode, resp); return;  }
   if resp.Uncompressed != true { fmt.Printf("Error: Discovered compressed body !\n"); return; }
   defer resp.Body.Close()
+  // NOTE: The response here has the very same kind of members as the list response
   body, err := io.ReadAll(resp.Body)
   if err != nil {  fmt.Printf("Error reading resp body (with id)\n");return;  }
   // Parse Response content to kur
