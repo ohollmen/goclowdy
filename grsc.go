@@ -24,14 +24,14 @@ package main
 // editor.formatOnSave
 // go build grsc.go
 import (
-	"context"
+	//"context"
 	"fmt"
 	"os" // Args
 	"reflect"
 	"regexp"
-	"time"
+	//"time"
 
-	"google.golang.org/api/iterator"
+	//"google.golang.org/api/iterator"
 
 	//compute "cloud.google.com/go/compute/apiv1" // Used only in lower levels
 	computepb "cloud.google.com/go/compute/apiv1/computepb"
@@ -40,7 +40,7 @@ import (
 	GPs "github.com/ohollmen/goclowdy/GPs"
 	MIs "github.com/ohollmen/goclowdy/MIs"
 	VMs "github.com/ohollmen/goclowdy/VMs"
-
+  //"github.com/ohollmen/goclowdy/workerpool"
 	OrgTree "github.com/ohollmen/goclowdy/OrgTree"
 
 	//"github.com/ohollmen/goclowdy"
@@ -57,14 +57,15 @@ import (
 	"encoding/json"
 	"sync" // go get -u golang.org/x/sync
 
-	"math/rand"
+	//"math/rand"
 
 	"flag"
 
 	//"regexp"
 
-	"github.com/ohollmen/goclowdy/workerpool"
+	
 	"golang.org/x/exp/slices" // 1.21 has this built-in
+  // "cloud.google.com/go/storage" // GCS, See: https://cloud.google.com/storage/docs/samples/storage-upload-file#storage_upload_file-go
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME", "KEEP (MID-TERM MONTHLY)"}
@@ -106,9 +107,9 @@ var scomms = []SubComm{
   {"subarr",    "Subarray Test", subarr_test},
   {"mitstats",  "List Machine Images (With time stats)", mi_time_stats},
   {"milist",    "List Machine Images", mi_list2},
-  {"vmbackup",  "Backup VMs from a project (Use overriding --project and --suffix as needed)", vm_backup},
-  {"projlist",  "List projects (in org)", proj_list},
-  {"projsvmbackup", "List Projects and VMs (Use --filter to perform labels based filtering)", projsvmbackup},
+  {"vmbackup",  "Backup VMs from a single project (Use overriding --project, --filter and --suffix as needed)", vm_backup},
+  {"projlist",  "List projects (in org, Use --ansible to output as ansible inventory)", proj_list}, // labelfilter
+  {"projsvmbackup", "Backup VMs from Org (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
   {"orgtree",   "Dump OrgTree as JSON", orgtree_dump},
   //{"","",},
   //{"","",},//{"","",},
@@ -141,9 +142,10 @@ func args_subcmd() string {
 // var Project = ""
 // Generic name filter for various operations (e.g.: name patter of VM:s to back up)
 var Filter = ""
-//var Labelfilter = ""
+var Labelfilter = ""
 var Suffix = ""
 var Prefix = "" // for e.g. projlist
+var Ansible = false;
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
 func args_bind() { // clpara map[string]string
@@ -155,9 +157,10 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&mic.CredF,   "appcreds", "", "GCP Cloud Application Credentials (string)")
   flag.BoolVar(&mic.Debug,     "debug", false, "Set debug mode.")
   flag.StringVar(&Filter,      "filter", "", "Label Filter OR VM name filter for Project/VM-MI Operations")
-  //flag.StringVar(&Labelfilter,      "labelfilter", "", "Label Filter for Project/VM-MI Operations")
+  flag.StringVar(&Labelfilter, "labelfilter", "", "Project Label Filter for Org/Project/VM-MI Operations")
   flag.StringVar(&Suffix,      "suffix", "", "Additional Suffix for Machine image (after vmname + IS date)")
   flag.StringVar(&Prefix,      "prefix", "", "Prefix (string) to use for projects listing (e.g. --prefix '    - ' for YAML list)")
+  flag.BoolVar(&Ansible,     "ansible", false, "Create projectlist as ansible inventory.")
   //flag.IntVar(p *int, name string, value int, usage string)
 
   // This does not work based on Go dangling pointer-policies
@@ -205,7 +208,7 @@ func main() {
   
   if len(os.Args) < 2 { usage("Subcommand missing !"); return; } // fmt.Println("Pass one of subcommands: "+subcmds); return
   op := args_subcmd()
-  args_bind() // OLD: clpara. Bind here, call flag.Parse() later (In handlers).
+  args_bind() // OLD: clpara. Bind here, call flag.Parse() later (In handlers, esp after config_load()).
   
   //flag.Parse() // os.Args[2:] From Args[2] onwards
   //fmt.Printf("CL-ARGS(map): %v\n", clpara);
@@ -230,18 +233,31 @@ func main() {
 // Return filtered array (if RE fails to compile, return empty set)
 func vmset_filter(all []*computepb.Instance, namepatt string) []*computepb.Instance {
   if namepatt == "" { return all; }
-  var ftd []*computepb.Instance // New filtered array
-  fmt.Printf("Got namepatt (form GCP_VM_NAMEPATT or --filter): %s\n", namepatt)
+  var ftd []*computepb.Instance // New name-filtered array
+  fmt.Printf("Got namepatt (form GCP_VM_NAMEPATT or --filter): '%s'\n", namepatt)
   NameRE, err := regexp.Compile(namepatt)
 
   if err != nil { fmt.Printf("Error: namepatt (RE) not compiled: %s\n", err); return ftd; }
     
-  for _, vm := range all { // FindStringSubmatch
-    if NameRE.FindString(vm.GetName()) != "" { ftd = append(ftd, vm); }
+  for _, item := range all { // FindStringSubmatch
+    if NameRE.FindString(item.GetName()) != "" { ftd = append(ftd, item); }
   }
   return ftd;
 }
 
+func miset_filter(all []*computepb.MachineImage, namepatt string) []*computepb.MachineImage {
+  if namepatt == "" { return all; }
+  var ftd []*computepb.MachineImage // New name-filtered array
+  fmt.Printf("Got namepatt (form GCP_VM_NAMEPATT or --filter): '%s'\n", namepatt)
+  NameRE, err := regexp.Compile(namepatt)
+
+  if err != nil { fmt.Printf("Error: namepatt (RE) not compiled: %s\n", err); return ftd; }
+    
+  for _, item := range all { // FindStringSubmatch
+    if NameRE.FindString(item.GetName()) != "" { ftd = append(ftd, item); }
+  }
+  return ftd;
+}
 // Show config (conf-file, env, CLI params merged)
 func env_ls() {
   fmt.Println("# The environment config:")
@@ -259,7 +275,7 @@ func env_ls() {
 }
 
 // Backup VMs from a (single) GCP Project.
-// Note here --filter does VM name based filtering (NOT ), --suffix works "normally"
+// Note here --filter does VM name based filtering (NOT labels), --suffix works "normally"
 func vm_backup() {
   // Need vmc and mic
   // vmc ...
@@ -326,6 +342,7 @@ func vm_backup() {
 }
 // List VMs. Set GCP_PROJECT and GOOGLE_APPLICATION_CREDENTIALS as needed (or get from config)
 func vm_ls() { // pname string
+    flag.Parse() // parse for --filter
     //ctx := context.Background()
     //mic.Init() // OLD: Init due to side effects affecting vmc
     // test overlapping sysm (old: vs). Borrow params from mic.
@@ -335,7 +352,8 @@ func vm_ls() { // pname string
     all := vmc.GetAll() //; fmt.Println(all)
     icnt := len(all)
     if icnt == 0 { fmt.Println("No VMs found"); return }
-    fmt.Printf("# Got %v  Instances\n", icnt) // Initial ... (Filtering ...)
+    fmt.Printf("# Got %v  Instances\n", icnt) // Initial ... (Filtering ..)
+    all = vmset_filter(all, Filter); //  Allow filter
     //stats := VMs.CreateStatMap(all)
     //fmt.Printf("%v", stats)
     // Test for daily MI. This is now embedded to mic.CreateFrom() logic.
@@ -365,6 +383,7 @@ func mi_list2() {
   rc := mic.Init()
   if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
   all := mic.GetAll()
+  all = miset_filter(all, Filter); // Name (RegExp) filter
   for _, mi := range all {
     fmt.Println(mi.GetName());
   }
@@ -463,173 +482,41 @@ func mi_time_stats() {
   fmt.Fprintf(os.Stderr, "# %d Images from %s\n", len(reparr), mic.Project); //totcnt
   }
 
-// Delete machine images per given config / policy (sourced from cfg or global defaults).
-// ONLY needs access to MIs (Uses mic).
-// TODO:
-// - Possibly Convert to use getAll, except we want MIMI (not full computepb.MachineImage ents)
-// - 3 pass: 1) Get items, 2) classify 3) delete
-// https://code.googlesource.com/gocloud/+/refs/tags/v0.101.1/compute/apiv1/machine_images_client.go
-// Old raw: //var delarr []*computepb.MachineImage // var item *computepb.MachineImage
-func mi_del() { // pname string
-  ctx := context.Background()
-  //config_load("", &mic); // Already on top
-  
-  rc := mic.Init()
-  if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic);  }
-  fmt.Printf("Config (after init): %+v\n", &mic);
-  if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
-  // Classification stats. Note: no wrapping make() needed w. element initialization
-  miclstat := map[int]int{0: 0, 1:0, 2:0, 3:0, 4:0, 5:0}
-  //TEST: miclstat_out(mic, miclstat); return;
-  // TODO: if Project != "" { mic.Project = Project; }
-  if mic.Project == "" { fmt.Println("No Project scope available for deletion (from config, cli or env)"); return }
-  var maxr uint32 = 500 // 20
-  req := &computepb.ListMachineImagesRequest{ Project: mic.Project, MaxResults: &maxr } // Filter: &mifilter } // 
-  //fmt.Println("Search MI from: "+cfg.Project+", parse by: "+time.RFC3339)
-  it := mic.Client().List(ctx, req)
-  if it == nil { fmt.Println("No mi:s from "+mic.Project); return; }
-  var delarr []MIMI
-  // Iterate MIs, check for need to del
-  totcnt := 0; todel := 0; // TODO: elim todel (get from slice)
-  verbose := true
-  for {
-    //fmt.Println("Next ...");
-    mi, err := it.Next()
-    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break } // At the end of normal iter. w. results
-    if mi == nil {  fmt.Println("No mi. check (actual) creds, project etc."); break } // No results (e.g. wrong creds)
-    /////// Actual processing ////////
-    // NEW: Use discovered UTC C-TS (From client, shared). TODO: Add to mimi (in delarr) ?
-    t, err := mic.CtimeUTC(mi) // TODO: (later ?) to mimi.ctime
-    if err != nil { fmt.Println("Create-time not parsed !");break; }
-    // OLD: mi.GetCreationTimestamp()
-    if verbose { fmt.Println("MI:"+mi.GetName()+" (MICreated: "+t.Format(time.RFC3339)+" "+wdnames[t.Weekday()]+")") } // Now w. weekday
-    var cl int = mic.Classify(mi)
-    if verbose { fmt.Println(verdict[cl]) }
-    miclstat[cl]++
-    if MIs.ToBeDeleted(cl) {
-      todel++
-      if verbose { fmt.Printf("DELETE %s\n", mi.GetName()) } // Also in DRYRUN
-      mimi := MIMI{miname: mi.GetName(), class: cl} // Add time, WD ?
-      // mimi.ctime = t
-      // Store MI to list
-      //delarr = append(delarr, mi) // OLD full mi
-      delarr = append(delarr, mimi)
-    } else {
-      if verbose { fmt.Printf("KEEP %s\n", mi.GetName()) }
-    }
-    if verbose { fmt.Printf("============\n") }
-    totcnt++
-  }
-  // Dry-run (or no ents) - terminate here
-  if !mic.DelOK { fmt.Printf("# Dry-run mode, DelOK = %t (%d to delete)\n", mic.DelOK, todel); miclstat_out(mic, miclstat);return; }
-  if len(delarr) == 0 { fmt.Printf("# Nothing to Delete (DelOK = %t, %d to delete)\n", mic.DelOK, todel); miclstat_out(mic, miclstat);return; }
-  // Delete items from delarr - either serially or in chunks or using channels
-  if mic.ChunkDelSize == -1 {
-    mimilist_del_chan(mic, delarr)
-  } else if mic.ChunkDelSize == 0 {
-    mimilist_del_serial(mic, delarr)
-  } else {
-    mimilist_del_chunk(mic, delarr)
-  }
-}
-// Delete MIs beyond max age
-func mi_del_max() {
+// old: mi_del()
 
-}
-func miclstat_out(mic MIs.CC, miclstat map[int]int) {
-  // Need: .UTC(). ?
-  fmt.Printf("MI Class (keep/delete reasoning) stats (%s, %s):\n", mic.Project, time.Now().Format("2006-01-02T15:04:05-0700")); // \n%+v\n", miclstat (raw dump)
-  for key, value := range miclstat {
-    fmt.Println("Class:", verdict[key], "(",key,") :", value)
-  }
-}
 
- // Serial Delete
-func mimilist_del_serial(mic MIs.CC, delarr []MIMI) {
-    for _, mimi := range delarr { // i
-      fmt.Printf("%s (%s)\n", mimi.miname, verdict[mimi.class]) // mi.GetName()
-      if mic.DelOK {
-        //OLD:rc := mic_delete_mi(&mic, mi.GetName());
-        rc := mic_delete_mi(&mic, &mimi);
-        if rc != 0 { }
-      }
-    }
-}
-// Chunk / Parallel delete
-func mimilist_del_chunk(mic MIs.CC, delarr []MIMI) { // ...
-    //return
-    sasize := mic.ChunkDelSize
-    chunks := chunk_mimi(delarr, sasize )
-    if chunks == nil { return }
-    // Modeled along 
-    for i, chunk := range chunks {
-      fmt.Printf("Chunk %d (of %d items): %+v\n", i, sasize, chunk);
-      var wg sync.WaitGroup
-      for _, item := range chunk{
-        wg.Add(1)
-        // Workaround for go remembering the last value for the pointer / chunk (here)
-        // CB closure gets the *current* value in iteration and forces the actual value to be passed
-        // (mnot the last value of iteration).
-        func (item MIMI) { go mic_delete_mi_wg(&mic, &item, &wg) } (item)
-        // test sleeping to not hit API throttling.
-        // https://golang.cafe/blog/golang-sleep-random-time.html
-        rand.Seed(time.Now().UnixNano())
-        //ms := time.Millisecond*100
-        //ms = time.Millisecond*(50 + rand.Intn(100))
-        ms := time.Duration(rand.Intn(100)+50) * time.Millisecond
-        fmt.Printf("SLEEP: %d\n", ms);
-        time.Sleep(ms)
-      }
-      wg.Wait()
-      fmt.Printf("Waited for chunk to complete\n");
-    }
-    return
-}
-// Delete items directly using original lnear delarr using channels (underneath).
-// This runs N items *all* the time instead waiting a "chunk" (where items could take different time
-  // to complete individually, waiting for the longest processing one) to complete.
-func mimilist_del_chan(mic MIs.CC, delarr []MIMI) {
-  // TODO: Use NewWorkerPool() to have control over config
-  wpool, _ := workerpool.NewWorkerPool(&workerpool.Config{WorkerLimit: mic.WorkerLimit, WorkerTimeoutSeconds: 0}) // NewDefaultWorkerPool()
-  var wg sync.WaitGroup
-  wg.Add(len(delarr))
-  for _, mimi := range delarr {
-    // Inner func gets assigned to work - so it *is* (inner) anon func
-    go func(mimi MIMI) {
-      defer wg.Done()
-      wpool.RequestWork(func() {mic_delete_mi(&mic, &mimi)}) 
-    }(mimi)
-    
-  }
-  wg.Wait()
-  fmt.Printf("Channel based processing completed !\n"); // of %d items, len(delarr)
-}
-func mic_delete_mi(mic * MIs.CC, mimi * MIMI) int { // mi *computepb.MachineImage
-  err := mic.Delete(mimi.miname) // mi.GetName()
-  if err != nil { fmt.Printf("Error Deleting MI: %s\n", mimi.miname); return 1
-  } else {
-   fmt.Printf("Deleted %s\n", mimi.miname); return 0
-  }
-  //fmt.Printf("Should have deleted %s. Set DelOK (MI_DELETE_EXEC) to actually delete.\n", mi.GetName())
-  //return 0
-}
+// old: mimilist_del_*
+// old: mic_delete_mi
+
+
 // Orig key_list
 
-
+// List Projects (In Org, under all folders)
+// For ansible GCP config see:
+// - https://docs.ansible.com/ansible/latest/collections/google/cloud/gcp_compute_inventory.html
+// - compose...: https://github.com/ansible/awx/issues/9812
 func proj_list()  { // error ?
   flag.Parse()
+  ans := Ansible;
+  itemprefix := "";
+  if ans { itemprefix = "  - " }
   //fmt.Printf("Got Filter: %s\n", Filter);
   //var qmap = map[string]string{} // {"include": "true"}
-  qmap := GPs.KvParse(Filter)
+  qmap := GPs.KvParse(Filter) // Labelfilter
   qstr := GPs.Map2Query(qmap)
   if qstr != "" { fmt.Printf("Query: %s\n", qstr); }
   Projects := GPs.ProjectsList(qstr)
-  fmt.Printf("# %d Projects retrieved by filter: '%s'\n", len(Projects), qstr)
-  // Filter ?
+  fmt.Printf("# %d Projects retrieved by labelfilter: '%s'\n", len(Projects), qstr)
+  if ans { fmt.Printf("---\nplugin: gcp_compute\nprojects:\n") }
+  // Filter additionally by name ?
   for _, project := range Projects {
     // fmt.Printf("%s =>\n%v\n", project.ProjectId, *project)
-    if Prefix != "" { fmt.Print(Prefix); }
+    if itemprefix != "" { fmt.Print(itemprefix); }
     fmt.Printf("%s\n", project.ProjectId)
+  }
+  if ans {
+    fmt.Printf("auth_kind: serviceaccount\nservice_account_file: %s\nhostnames:\n  - name\n# prefix: ...,key: ...\nkeyed_groups: []\n", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+    fmt.Printf("compose:\n  ansible_host: networkInterfaces[0].networkIP\n")
   }
   return
 }
@@ -638,7 +525,7 @@ func proj_list()  { // error ?
 // See also: vm_backup
 func projsvmbackup() {
   flag.Parse()
-  qmap := GPs.KvParse(Filter)
+  qmap := GPs.KvParse(Filter) // Labelfilter
   qstr := GPs.Map2Query(qmap)
   //qstr := "" // "labels.include=true"
   if Suffix != "" { fmt.Printf("Current suffix: %s\n", Suffix); }
