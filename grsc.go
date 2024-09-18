@@ -74,13 +74,8 @@ var wdnames = []string{"SUN","MON","TUE","WED","THU","FRI","SAT"}
 // Default MI client config
 // 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat). KeepMaxH (days) 365 => 548 (18 m)
 var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 6, MD_keep: 1, KeepMinH: 168,  KeepMaxH: (24 * (548 + 7)), } // tnow: tnow, tloc: loc TZn: "Europe/London"
-var bindpara MIs.CC = MIs.CC{}
-// Machine image mini-info. Allow deletion to utilize this (for reporting output). Add creation time ?
-type MIMI struct {
-  miname string
-  class int
-  //ctime time.Time
-}
+//var bindpara MIs.CC = MIs.CC{}
+
 // Subcommand callback (No params for now)
 type SCCB = func() //error
 type SubComm struct {
@@ -99,6 +94,7 @@ type SubComm struct {
 var scomms = []SubComm{
   {"vmlist",    "VM list", vm_ls}, // OLD: Machine image / vm_mi_list
   {"midel",     "Delete Machine images", mi_del},
+  {"midelmax",     "Delete Machine images beyond max age (only)", mi_del_max},
   {"keylist",   "List SA Keys from a GCP Project", key_list},
   {"keycheck",   "Check SA Key given in Env. GOOGLE_APPLICATION_CREDENTIALS", key_check},
   
@@ -107,9 +103,10 @@ var scomms = []SubComm{
   {"subarr",    "Subarray Test", subarr_test},
   {"mitstats",  "List Machine Images (With time stats)", mi_time_stats},
   {"milist",    "List Machine Images", mi_list2},
-  {"vmbackup",  "Backup VMs from a single project (Use overriding --project, --filter and --suffix as needed)", vm_backup},
-  {"projlist",  "List projects (in org, Use --ansible to output as ansible inventory)", proj_list}, // labelfilter
+  {"vmbackup",  "Backup VMs from a single project (Use overriding --project, --filter (by VM name) and --suffix (additional suffix) as needed)", vm_backup},
+  {"projlist",  "List projects (in org, Use --ansible to output as ansible inventory, use --filter to do label filtering)", proj_list}, // labelfilter
   {"projsvmbackup", "Backup VMs from Org (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
+  {"projsvmlist", "List VMs from Org along their project (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
   {"orgtree",   "Dump OrgTree as JSON", orgtree_dump},
   //{"","",},
   //{"","",},//{"","",},
@@ -168,10 +165,11 @@ func args_bind() { // clpara map[string]string
   //flag.StringVar(&clpara["appcreds"], "appcreds", "", "GCP Cloud Application Credentials (string)")
 }
 // OLD: Override CLI originated params last (after cfg, env)
-func args_override() { // UNUSED
-  fmt.Printf("Project=%s\n", bindpara.Project)
-  if bindpara.Project != "" { mic.Project = bindpara.Project; } // After config_load() ?
-}
+//func args_override() { // UNUSED
+//  fmt.Printf("Project=%s\n", bindpara.Project)
+//  if bindpara.Project != "" { mic.Project = bindpara.Project; } // After config_load() ?
+//}
+
 // Override env based on map and (member name) reflect. How to pass generic pointer (any ?) ?
 // Interface (is-a-pointer) ? Also any is an interface.
 func args_env_merge(e2sm map[string]string, mystruct any ) int { // UNUSED (replaced by env.Set())
@@ -203,11 +201,13 @@ func args_env_merge(e2sm map[string]string, mystruct any ) int { // UNUSED (repl
   }
   return cnt; // # changed/overriden
 }
+var gop = ""
 func main() {
   //ctx := context.Background()
   
   if len(os.Args) < 2 { usage("Subcommand missing !"); return; } // fmt.Println("Pass one of subcommands: "+subcmds); return
   op := args_subcmd()
+  gop = op // Assign to globally usable counterpart
   args_bind() // OLD: clpara. Bind here, call flag.Parse() later (In handlers, esp after config_load()).
   
   //flag.Parse() // os.Args[2:] From Args[2] onwards
@@ -340,7 +340,7 @@ func vm_backup() {
   /////// Multi-VM backup client ///////////////
   mic.CreateFromMany(all, cb, namesuffbase)
 }
-// List VMs. Set GCP_PROJECT and GOOGLE_APPLICATION_CREDENTIALS as needed (or get from config)
+// List VMs from a single project. Set GCP_PROJECT and GOOGLE_APPLICATION_CREDENTIALS as needed (or get from config)
 func vm_ls() { // pname string
     flag.Parse() // parse for --filter
     //ctx := context.Background()
@@ -352,7 +352,7 @@ func vm_ls() { // pname string
     all := vmc.GetAll() //; fmt.Println(all)
     icnt := len(all)
     if icnt == 0 { fmt.Println("No VMs found"); return }
-    fmt.Printf("# Got %v  Instances\n", icnt) // Initial ... (Filtering ..)
+    fmt.Printf("# Got %v  Instances (from project '%s')\n", icnt, vmc.Project) // Initial ... (Filtering ..)
     all = vmset_filter(all, Filter); //  Allow filter
     //stats := VMs.CreateStatMap(all)
     //fmt.Printf("%v", stats)
@@ -388,7 +388,7 @@ func mi_list2() {
     fmt.Println(mi.GetName());
   }
 }
-// New MI List with statistical count of MIs per time eras (now...1w, 1w...1y).
+// New MI List with statistical count of MIs per time eras (now...1w, 1w...1.Xy, > 1.Xy).
 //  Report Backup statistics per host (in current project).
 // Mix of access to VMs (find all) and MIs (See: vm_ls() for "ingredients" of solution)
 // The mic.HostREStr must be a pattern that captures the hostname part from the machine image as capture group 1
@@ -448,7 +448,7 @@ func mi_time_stats() {
     t, err := mic.CtimeUTC(mi)
     if err != nil { fmt.Printf("MI C-TS not parsed !"); return; }
     agehrs := mic.AgeHours2(t)
-    if (agehrs > 1000000) { return; }
+    if (agehrs > float64( mic.KeepMaxH) ) { return; } // Test 1000000 => mic.KeepMaxH
     //
   }
   if maxtime { cb = cb2; }
@@ -467,7 +467,7 @@ func mi_time_stats() {
 }
 
  // Output MI Statistics per timespan (stored in a map[vmname]{MIStat})
- func vmmi_tstats_out (stats map[string]*VMs.MIStat) {
+func vmmi_tstats_out (stats map[string]*VMs.MIStat) {
   //var reparr []*VMs.MIStat // Empty/0-items, no pre-alloc
   reparr := make([]*VMs.MIStat, len(stats)) // Prealloc to right size (Use indexes)
   i := 0
@@ -480,7 +480,7 @@ func mi_time_stats() {
   if err != nil { fmt.Println("Error JSON-serializing VMMI stats !"); return; }
   fmt.Printf("%s\n", jba) // Ok w. []byte
   fmt.Fprintf(os.Stderr, "# %d Images from %s\n", len(reparr), mic.Project); //totcnt
-  }
+}
 
 // old: mi_del()
 
@@ -520,6 +520,7 @@ func proj_list()  { // error ?
   }
   return
 }
+// List OR List + Backup VMs from all the projects discovered based on labels (See explanations on filtering below).
 // E.g. 352 => 60 (5s)
 // Note: --filter here is for the labels and must be on CLI in format "labels.include=true"
 // See also: vm_backup
@@ -544,16 +545,35 @@ func projsvmbackup() {
   all := []*computepb.Instance{}
   // Initially: list + append(all)
   for _, pvm := range pvms {
-    fmt.Printf("  - VM: %s/%s\n", pvm.Project.ProjectId, pvm.Vm.GetName());
+    fmt.Printf("  - %s / %s\n", pvm.Project.ProjectId, pvm.Vm.GetName());
     //err = mic.CreateFrom(pvm.Vm, usesuff, "")
     //if err !=nil { fmt.Printf("Error Creating MI out of VM: '%s': %s\n", pvm.Vm.GetName(), err); continue; }
     //fmt.Println("MI created w. suffix '%s' from VM '%s' successfully\n", usesuff, pvm.Vm.GetName())
     all = append(all, pvm.Vm)
   }
+  if (gop == "projsvmlist") { return; } // List only, do NOT backup
   // Backup (Bulk)
   mic.CreateFromMany(all, nil, usesuff)
 }
-
+func load_org_conf(fn string) *OrgTree.OrgEnt {
+  // Problem: in OrgEnt we have generic json member "id", not fit for config file.
+  // Solution: create a situation specific struct matching json mems, populate it, do 2-mem-copy
+  type OrgConf struct { OrgId string } // Dummy struct to ONLY hold the OrgId
+  var oc OrgConf = OrgConf{}
+  //root := &OrgEnt{ Name: orgname, Id: orgid, Etype: "organization" };
+  // Run unsmarshal on fn
+  _, err := os.Stat(fn)
+  if err != nil { return nil }
+  cont, err := os.ReadFile(fn)
+  if err != nil { return nil }
+  err = json.Unmarshal(cont, &oc)
+  // NOT: return &oc
+  if oc.OrgId != "" {
+    on := OrgTree.OrgEnt{Id: oc.OrgId, Etype: "organization"}
+    return &on
+  }
+  return nil
+}
 func orgtree_dump() {
   oname := "my.org";
   oid := "007"
@@ -562,6 +582,8 @@ func orgtree_dump() {
   oload.LoadInit()
   oload.Debug = true
   root := OrgTree.NewOrgTree(oid, oname);
+  root2 := load_org_conf("./goclowdy.conf.json") // Try config
+  if root2 != nil { root = root2 }
   //fmt.Printf("Constructed Org, but skipping traverse\n"); return; // DEBUG
   oload.LoadOrgTree(root);
   dump, err := json.MarshalIndent(root, "", "  ")

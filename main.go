@@ -94,6 +94,10 @@ func mic_delete_mi_wg(mic * MIs.CC, mimi * MIMI, wg *sync.WaitGroup) error {
 // Load JSON Config (for MI deletion, VM listing ...)
 func config_load(fname string, mic * MIs.CC) error {
   if fname == "" { fname = "./goclowdy.conf.json" }
+  // Check file presence !!
+  stinfo, err := os.Stat(fname)
+  if os.IsNotExist(err) { return err }
+  if stinfo.IsDir() { return errors.New("Config file is a DIR!") }
   dat, err := os.ReadFile(fname)
   if err != nil { return errors.New("Config Not found ") } // + string(err)
   err = json.Unmarshal(dat, mic)

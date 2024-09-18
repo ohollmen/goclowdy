@@ -9,10 +9,18 @@ import (
   "google.golang.org/api/iterator"
   "time"
   "math/rand"
+  //"os" // os.Exit(rc)
   MIs "github.com/ohollmen/goclowdy/MIs"
   "github.com/ohollmen/goclowdy/workerpool"
 )
 //var dummy int = 5;
+
+// Machine image mini-info. Allow deletion to utilize this (for reporting output). Add creation time ?
+type MIMI struct {
+  miname string
+  class int
+  ctime time.Time
+}
 
 // Delete machine image/MIMI (Used for serial and channels (workerpool) based deletion).
 func mic_delete_mi(mic * MIs.CC, mimi * MIMI) int { // mi *computepb.MachineImage
@@ -25,23 +33,37 @@ func mic_delete_mi(mic * MIs.CC, mimi * MIMI) int { // mi *computepb.MachineImag
   //return 0
 }
 
-// Delete MIs beyond max age
+// Delete MIs beyond max age.
+// This is custom case for max age, partially to proto/prove/test the mic.GetAll() approach.
 func mi_del_max() {
+  // Currently Project gets set in mic
   rc := mic.Init()
   if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
+  agelimit := float64(mic.KeepMaxH) // Once, outside loop.
+  // Calc cut-off date to display to user
+  // https://stackoverflow.com/questions/37697285/how-to-get-yesterdays-date-in-golang
+  told := mic.Tnow().AddDate(0, 0, -(mic.KeepMaxH / 24))
+  //told := mic.Tnow().Add( int64(mic.KeepMaxH) * time.Hour ) // - invalid operation: mic.KeepMaxH * time.Hour (mismatched types int and time.Duration) // or int64 and ...
+  fmt.Printf("Max-Old boundary date: %s\n", (&told).Format("2006-01-02") )
+  //if true { return } 
   all := mic.GetAll()
-  if all == nil { fmt.Printf("No machine images gotten."); return }
+  if all == nil { fmt.Printf("No machine images gotten.\n"); return }
+  fmt.Printf("Got initial set of %d MIs (in %s)\n", len(all), mic.Project); // return
   todel := []*computepb.MachineImage{}
-  if todel == nil {}
+  if todel == nil { return; }
   for _, mi := range all {
     tc, err := mic.CtimeUTC(mi)
 	if err != nil {}
+	// Older than nax
     age := mic.AgeHours2(tc)
-    if age >= float64(mic.KeepMaxH) {
+    if age >= agelimit {
       fmt.Printf("DELETE %s (%s)\n", mi.GetName(), (&tc).Format("2006-01-02")) // "2006-01-02T15:04:05-0700"
       todel = append(todel, mi)
     }
   }
+  if len(todel) < 1 { fmt.Printf("No MIs (older than max axe) to delete"); return }
+  fmt.Printf("%d MIs to delete (out of %d)\n", len(todel), len(all));
+  /// Delete ...
 }
 
 // Delete machine images per given config / policy (sourced from cfg or global defaults).
@@ -63,16 +85,20 @@ func mi_del() { // pname string
   miclstat := map[int]int{0: 0, 1:0, 2:0, 3:0, 4:0, 5:0}
   //TEST: miclstat_out(mic, miclstat); return;
   // TODO: if Project != "" { mic.Project = Project; }
+  fmt.Println("Search MIs from: "+mic.Project+", parse by: "+time.RFC3339)
+  totcnt := 0; // todel := 0; // TODO: elim todel (get from slice)
+  var delarr []MIMI
+  verbose := true
+  // all := mic.GetAll()
+  //if all == nil { fmt.Printf("No machine images gotten."); return }
+  // totcnt := len(all)
   if mic.Project == "" { fmt.Println("No Project scope available for deletion (from config, cli or env)"); return }
   var maxr uint32 = 500 // 20
   req := &computepb.ListMachineImagesRequest{ Project: mic.Project, MaxResults: &maxr } // Filter: &mifilter } // 
-  //fmt.Println("Search MI from: "+cfg.Project+", parse by: "+time.RFC3339)
   it := mic.Client().List(ctx, req)
-  if it == nil { fmt.Println("No mi:s from "+mic.Project); return; }
-  var delarr []MIMI
+  if it == nil { fmt.Println("No MIs from Project: "+mic.Project); return; }
   // Iterate MIs, check for need to del
-  totcnt := 0; todel := 0; // TODO: elim todel (get from slice)
-  verbose := true
+  
   for {
     //fmt.Println("Next ...");
     mi, err := it.Next()
@@ -88,23 +114,22 @@ func mi_del() { // pname string
     if verbose { fmt.Println(verdict[cl]) }
     miclstat[cl]++
     if MIs.ToBeDeleted(cl) {
-      todel++
+      //todel++
       if verbose { fmt.Printf("DELETE %s\n", mi.GetName()) } // Also in DRYRUN
-      mimi := MIMI{miname: mi.GetName(), class: cl} // Add time, WD ?
+      mimi := MIMI{miname: mi.GetName(), class: cl, ctime: t} // Add time, WD ?
       // mimi.ctime = t
-      // Store MI to list
-      //delarr = append(delarr, mi) // OLD full mi
-      delarr = append(delarr, mimi)
+      delarr = append(delarr, mimi) //  OLD: store full mi
     } else {
       if verbose { fmt.Printf("KEEP %s\n", mi.GetName()) }
     }
-    if verbose { fmt.Printf("============\n") }
+    if verbose { fmt.Printf("============\n") } // divider
     totcnt++
   }
   // Dry-run (or no ents) - terminate here
-  if !mic.DelOK { fmt.Printf("# Dry-run mode, DelOK = %t (%d to delete)\n", mic.DelOK, todel); miclstat_out(mic, miclstat);return; }
-  if len(delarr) == 0 { fmt.Printf("# Nothing to Delete (DelOK = %t, %d to delete)\n", mic.DelOK, todel); miclstat_out(mic, miclstat);return; }
+  if !mic.DelOK       { fmt.Printf("# Dry-run mode, (DelOK = %t, %d to delete)\n", mic.DelOK, len(delarr)); miclstat_out(mic, miclstat);return; }
+  if len(delarr) == 0 { fmt.Printf("# Nothing to Delete (DelOK = %t, %d to delete)\n", mic.DelOK, len(delarr)); miclstat_out(mic, miclstat);return; }
   // Delete items from delarr - either serially or in chunks or using channels
+  // func mimilist_delete(mic MIs.CC, delarr []MIMI) {
   if mic.ChunkDelSize == -1 {
     mimilist_del_chan(mic, delarr)
   } else if mic.ChunkDelSize == 0 {
@@ -112,6 +137,7 @@ func mi_del() { // pname string
   } else {
     mimilist_del_chunk(mic, delarr)
   }
+  //}
 }
 
 // MI Classification stats output (mainly for targeting deletion) 

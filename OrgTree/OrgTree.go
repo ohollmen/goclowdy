@@ -59,6 +59,9 @@ func (oload * OrgLoader) LoadInit() {
   oload.delay = time.Millisecond * 20
   return
 }
+//func NewOrgTreeConf(fn string) *OrgEnt{
+//  
+//}
 // Load org tree by Creating Stub-Org by orgid, orgname
 func NewOrgTree(orgid string, orgname string) *OrgEnt{
   if orgid == "" { return nil; } // Also Error ?
