@@ -42,7 +42,7 @@ type CC struct {
   Debug bool
   NameREStr string `env:"MI_STDNAME"` // MI Standard name RE
   NameRE * regexp.Regexp    // Use func (*Regexp) String to get orig string
-  HostREStr string `env:"MI_HOSTPATT"` // Hostname capture from MI name (should have 2 cap.parens 1sh: hostname, 2nd: date)
+  HostREStr string `env:"MI_HOSTPATT"` // MI Hostname capture/extract from MI name (should have 2 cap.parens 1st: hostname, 2nd: date)
   HostRE * regexp.Regexp
   ChunkDelSize int  `env:"MI_CHUNK_DEL_SIZE"`
   WorkerLimit int
@@ -51,7 +51,7 @@ type CC struct {
 
 
 const (
-  KEEP_SAFE int = 0
+  KEEP_SAFE int = 0 // Play safe, mi.CreationTimestamp could not be parsed
   KEEP_NEW = 1 // Newer than KeepMinH
   KEEP_WD = 2 // In intermediate time, Matching WD_keep
   DEL_1W  = 3 // In intermediate time, not WD_keep
@@ -71,7 +71,7 @@ func (cfg * CC) EnvMerge() {
   if os.Getenv("GCP_PROJECT") != "" { cfg.Project = os.Getenv("GCP_PROJECT") }
   if os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "" { cfg.CredF = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") }
   // if os.Getenv("GCP_CLOCK_TZN") != "" { cfg.TZn = os.Getenv("GCP_CLOCK_TZN") }
-  if os.Getenv("MI_STDNAME") != "" { cfg.NameREStr = os.Getenv("MI_STDNAME") }
+  if os.Getenv("MI_STDNAME") != "" { cfg.NameREStr = os.Getenv("MI_STDNAME") } // config: NameREStr
   if os.Getenv("MI_CHUNK_DEL_SIZE") != "" { cfg.ChunkDelSize, _ = strconv.Atoi( os.Getenv("MI_CHUNK_DEL_SIZE") ); }
   if os.Getenv("MI_DELETE_EXEC") != "" { cfg.DelOK = true; } // Any non-empty
 }
@@ -126,11 +126,11 @@ func (cfg * CC) Init() int { // TODDO pass: clpara map[string]string to patch af
   //if !stdm { fmt.Println("STD Name re not matching "); return }
   if cfg.NameREStr != "" {
     cfg.NameRE, err = regexp.Compile(cfg.NameREStr) // (*Regexp, error) // Also MustCompile
-    if err != nil { fmt.Println("Cannot compile STD name RegExp"); return 1 }
+    if err != nil { fmt.Println("Cannot compile MI STD name RegExp"); return 1 }
   }
   if cfg.HostREStr != "" {
     cfg.HostRE, err = regexp.Compile(cfg.HostREStr)
-    if err != nil { fmt.Println("Cannot compile hostpatt RegExp"); return 1 }
+    if err != nil { fmt.Println("Cannot compile MI hostpattern extraction RegExp"); return 1 }
   }
   // 
   err = cfg.Validate()
@@ -184,7 +184,7 @@ func (cfg * CC) Classify(mi * computepb.MachineImage) int {
   hrs := cfg.AgeHours2(t) // TODO !!! (Need above for err or check for ret'd -1 / err ?)
   //if hrs < 0 { return KEEP_SAFE; } // T-Parse error in AgeHours()
   // NEW: Non-std Naming
-  //if (cfg.NameRE != nil) && (!cfg.NameRE.MatchString( mi.GetName() )) { return KEEP_CUSTOM; }
+  if (cfg.NameRE != nil) && (!cfg.NameRE.MatchString( mi.GetName() )) { return KEEP_CUSTOM; }
   // NEW: Use cfg.KeepMaxH (OLD: (24 * (365 + 7))). 
   if hrs > float64(cfg.KeepMaxH) { return DEL_OLD; } // fmt.Println("DEL "); // Need float64() ?
   // Less than MAX period (e.g. 1Y+1W) old ... but
@@ -378,8 +378,8 @@ func (mic * CC) GetAll() []*computepb.MachineImage {
   for {
     //fmt.Println("Next ..."); // DEBUG
     mi, err := it.Next()
-    if err == iterator.Done { fmt.Printf("# Iter of %d MIs done\n", totcnt); break }
-    if mi == nil { fmt.Println("No mi gotten in iteration. check (actual) creds, project etc."); break }
+    if err == iterator.Done { fmt.Fprintf(os.Stderr, "# Iter of %d MIs done\n", totcnt); break }
+    if mi == nil { fmt.Fprintln(os.Stderr, "No mi gotten in iteration. check (actual) creds, project etc."); break }
     arr = append(arr, mi)
     totcnt++
   }

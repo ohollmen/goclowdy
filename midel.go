@@ -79,6 +79,7 @@ func mi_del() { // pname string
   // flag.Parse() // TODO. Ok ? Not done before ?
   rc := mic.Init()
   if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic);  }
+  if Delok { mic.DelOK = true }
   fmt.Printf("Config (after init): %+v\n", &mic);
   if rc != 0 { fmt.Printf("Machine image module init failed: %d\n", rc); return }
   // Classification stats. Note: no wrapping make() needed w. element initialization

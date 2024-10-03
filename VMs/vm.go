@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 	"unsafe"
-
+  "path"
 	"github.com/codingconcepts/env"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/proto"
@@ -174,4 +174,38 @@ func ISODate() string {
   now := time.Now()
   y, m, d := now.Date()
   return fmt.Sprintf("%d-%.2d-%.2d",y, int(m), d)
+}
+
+// Stop VM. TODO: Pass explicit (e.g. --exec) flag to actually shut down (?)
+func (cfg * CC) Stop(vm * computepb.Instance) error {
+  ctx := context.Background()
+  // Project from SelfLink ?
+  fmt.Printf("VM %s Zone: %s\n", vm.GetName(), path.Base(*vm.Zone)); return nil;
+  req := &computepb.StopInstanceRequest{
+    Project:  cfg.Project,
+    Zone:     path.Base(*vm.Zone), //Zone: vm.Zone, // NOTE: Full "Zone" (path) has project in it !
+    Instance: vm.GetName(),
+  }
+  op, err := cfg.c.Stop(ctx, req)
+  /*
+  req := &computepb.StartInstanceRequest{
+    Project:  cfg.Project,
+    Zone:     path.Base(*vm.Zone),
+    Instance: vm.GetName(),
+  }
+  op, err := cfg.c.Start(ctx, req)
+  */
+  if err != nil { return fmt.Errorf("unable to stop instance: %w", err) }
+  if err = op.Wait(ctx); err != nil { return fmt.Errorf("unable to wait for the operation: %w", err) }
+  return nil
+}
+
+//func Tags()
+// Change machine type
+//https://cloud.google.com/compute/docs/instances/changing-machine-type-of-stopped-instance
+func (cfg * CC) MachtypeChange(vm * computepb.Instance, mtype * string) error {
+  // Check in VM:
+  // - If machinetype change is needed (compare)
+  // - If stopping is needed
+  return nil
 }

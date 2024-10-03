@@ -68,11 +68,13 @@ import (
   // "cloud.google.com/go/storage" // GCS, See: https://cloud.google.com/storage/docs/samples/storage-upload-file#storage_upload_file-go
 )
 
-var verdict = [...]string{"KEEP to be safe", "KEEP NEW (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME", "KEEP (MID-TERM MONTHLY)"}
+var verdict = [...]string{"KEEP to be safe", "KEEP NEW/RECENT (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME", "KEEP (MID-TERM, MONTHLY)"}
 var envcfgkeys = [...]string{"GCP_PROJECT","GOOGLE_APPLICATION_CREDENTIALS","MI_DELETE_EXEC","MI_STDNAME", "MI_CHUNK_DEL_SIZE"}
-var wdnames = []string{"SUN","MON","TUE","WED","THU","FRI","SAT"}
-// Default MI client config
-// 168 h = 1 = week, (24 * (365 + 7)) hours = 1 year,  weekday 5 = Friday (wdays: 0=Sun... 6=Sat). KeepMaxH (days) 365 => 548 (18 m)
+var wdnames = []string{"SUN","MON","TUE","WED","THU","FRI","SAT"} // used by mid_del
+// Default MI client config (provide sane default and example, all time units are hours).
+// - KeepMinH 168 h = 1 week
+// - Weekly, Monthly: WD_keep - e.g. weekday 6 = Saturday (wdays: 0=Sun... 6=Sat), MD_keep - e.g. 1 = First (always exists)
+// - KeepMaxH examples: (24 * (365 + 7)) hours = 1 year (365 d), (24 * (548 + 7)) h => 1.5 years (548 d => 18 mon, 13320 h) 
 var mic  MIs.CC = MIs.CC{Project: "",  WD_keep: 6, MD_keep: 1, KeepMinH: 168,  KeepMaxH: (24 * (548 + 7)), } // tnow: tnow, tloc: loc TZn: "Europe/London"
 //var bindpara MIs.CC = MIs.CC{}
 
@@ -93,7 +95,7 @@ type SubComm struct {
 // same signature (refactor handles hand-in-hand)
 var scomms = []SubComm{
   {"vmlist",    "VM list", vm_ls}, // OLD: Machine image / vm_mi_list
-  {"midel",     "Delete Machine images", mi_del},
+  {"midel",     "Delete Machine images (per retention config, use --project for proj. override, --delok to actually delete)", mi_del},
   {"midelmax",     "Delete Machine images beyond max age (only)", mi_del_max},
   {"keylist",   "List SA Keys from a GCP Project", key_list},
   {"keycheck",   "Check SA Key given in Env. GOOGLE_APPLICATION_CREDENTIALS", key_check},
@@ -108,6 +110,7 @@ var scomms = []SubComm{
   {"projsvmbackup", "Backup VMs from Org (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
   {"projsvmlist", "List VMs from Org along their project (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
   {"orgtree",   "Dump OrgTree as JSON", orgtree_dump},
+  {"projvmstop", "Stop VMs in a Project (Use --project and optional --filter)", proj_shutdown},
   //{"","",},
   //{"","",},//{"","",},
 
@@ -143,6 +146,7 @@ var Labelfilter = ""
 var Suffix = ""
 var Prefix = "" // for e.g. projlist
 var Ansible = false;
+var Delok = false;
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
 func args_bind() { // clpara map[string]string
@@ -157,7 +161,8 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&Labelfilter, "labelfilter", "", "Project Label Filter for Org/Project/VM-MI Operations")
   flag.StringVar(&Suffix,      "suffix", "", "Additional Suffix for Machine image (after vmname + IS date)")
   flag.StringVar(&Prefix,      "prefix", "", "Prefix (string) to use for projects listing (e.g. --prefix '    - ' for YAML list)")
-  flag.BoolVar(&Ansible,     "ansible", false, "Create projectlist as ansible inventory.")
+  flag.BoolVar(&Ansible,      "ansible", false, "Create projectlist as ansible inventory.")
+  flag.BoolVar(&Delok,        "delok", false, "Indicate that deletion is okay (e.g. MI).")
   //flag.IntVar(p *int, name string, value int, usage string)
 
   // This does not work based on Go dangling pointer-policies
@@ -231,6 +236,7 @@ func main() {
 
 // Filter VMSet (passed as all) by name pattern string.
 // Return filtered array (if RE fails to compile, return empty set)
+// TODO: Similar filtering by vm.Labels (map[string]string) ... if vm.Labels[k] == v {...} (match all (AND) in criteria map)
 func vmset_filter(all []*computepb.Instance, namepatt string) []*computepb.Instance {
   if namepatt == "" { return all; }
   var ftd []*computepb.Instance // New name-filtered array
@@ -375,7 +381,7 @@ func vm_ls() { // pname string
 }
 
 func mi_list2() {
-  fmt.Printf("Proj: %s\n", mic.Project);
+  //fmt.Printf("Proj: %s\n", mic.Project);
   flag.Parse()
   //vmc.Project = mic.Project;
   //if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
@@ -384,9 +390,15 @@ func mi_list2() {
   if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
   all := mic.GetAll()
   all = miset_filter(all, Filter); // Name (RegExp) filter
+  fmt.Println("[");
   for _, mi := range all {
-    fmt.Println(mi.GetName());
+    //fmt.Println(mi.GetName());
+    // Get ISO date
+    t, _ := mic.CtimeUTC(mi);
+    cls := mic.Classify(mi);
+    fmt.Printf(" {\"title\": \"%s\", \"from\": \"%s\", \"to\": \"%s\", \"cls\": %d},\n", mi.GetName(), t.Format("2006-01-02"), t.Format("2006-01-02"), cls);
   }
+  fmt.Println("{}]");
 }
 // New MI List with statistical count of MIs per time eras (now...1w, 1w...1.Xy, > 1.Xy).
 //  Report Backup statistics per host (in current project).
@@ -551,7 +563,7 @@ func projsvmbackup() {
     //fmt.Println("MI created w. suffix '%s' from VM '%s' successfully\n", usesuff, pvm.Vm.GetName())
     all = append(all, pvm.Vm)
   }
-  if (gop == "projsvmlist") { return; } // List only, do NOT backup
+  if (gop == "projsvmlist") { return; } // List only, do NOT backup (return early)
   // Backup (Bulk)
   mic.CreateFromMany(all, nil, usesuff)
 }
@@ -594,4 +606,23 @@ func orgtree_dump() {
   root.Process(OrgTree.Dumpent, nil)
   return
 }
-
+// Shut down project VM:s (or all under folder ?)
+// TODO: label filter variant of vmset_filter()
+func proj_shutdown() {
+  flag.Parse() // parse for --filter
+  vmc := VMs.CC{Project: mic.Project, CredF: mic.CredF} //  
+  err := vmc.Init()
+  if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
+  all := vmc.GetAll() //; fmt.Println(all)
+  icnt := len(all)
+  if icnt == 0 { fmt.Println("No VMs found"); return }
+  fmt.Printf("# Got %v  Instances (from project '%s')\n", icnt, vmc.Project) // Initial ... (Filtering ..)
+  all = vmset_filter(all, Filter); //  Allow filter
+  //stats := VMs.CreateStatMap(all)
+  //fmt.Printf("%v", stats)
+  // Test for daily MI. This is now embedded to mic.CreateFrom() logic.
+  //mic.Init() // If bottom MI lookup enabled
+  for _, it := range all{ // Instance
+    vmc.Stop(it)
+  }
+}
