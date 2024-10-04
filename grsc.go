@@ -66,6 +66,8 @@ import (
 	
 	"golang.org/x/exp/slices" // 1.21 has this built-in
   // "cloud.google.com/go/storage" // GCS, See: https://cloud.google.com/storage/docs/samples/storage-upload-file#storage_upload_file-go
+  //"path/filepath" // Win + UNIX
+  "path" // "/" based paths (std. lib)
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW/RECENT (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME", "KEEP (MID-TERM, MONTHLY)"}
@@ -405,6 +407,7 @@ func mi_list2() {
 // Mix of access to VMs (find all) and MIs (See: vm_ls() for "ingredients" of solution)
 // The mic.HostREStr must be a pattern that captures the hostname part from the machine image as capture group 1
 // e.g. export MI_HOSTPATT='^(\w+-\d{1,3}-\d{1,3}-\d{1,3}-\d{1,3})'
+// https://www.pulumi.com/registry/packages/gcp/api-docs/compute/machineimage/
 func mi_time_stats() {
   //ctx := context.Background()
   //////// VMs //////////
@@ -441,13 +444,23 @@ func mi_time_stats() {
     agehrs := mic.AgeHours2(t)
     //if agehrs > float64(mic.KeepMaxH) { fmt.Printf("Too old\n"); continue; } // Do not discard, BUT ADD to stats
     //if (mic.HostRE != nil) { // No need to check, has been checked much earlier !!!
+      
+      // TODO: Extract Originating VM from mi instead of extracting with RE (?)
+      // source_instance:"https://www.googleapis.com/compute/v1/projects/spgovusm1-saas-sec/zones/us-east4-a/instances/splkcm-10-252-8-138"
+      miname := path.Base( mi.GetSourceInstance() )
+      //fmt.Printf("%v", mi);
+      //fmt.Printf("%s\n", miname); os.Exit(0) // Test
+      /* Old legacy RE-based name extraction. Still do standard name detection ?
       m := mic.HostRE.FindStringSubmatch( mi.GetName() )
       // NOTE: HostRE is likely to ONLY match Std. name pattern, so no-match may/will happen for all the ad-hoc backups.
       if len(m) < 1 { fmt.Fprintf(os.Stderr, "Warning: No capture items for hostname matching (%s)\n", mi.GetName() ); return; }
       fmt.Fprintf(os.Stderr, "HOSTMatch: %v, MINAME: %s AGE: %f\n", m[1], mi.GetName(), agehrs );
+      miname := m[1]
       mis, ok := stats[m[1]] // MI stat. Is this copy or ref to original ? https://golang.cafe/blog/how-to-check-if-a-map-contains-a-key-in-go
+      */
+      mis, ok := stats[miname]
       //if mis.Mincnt > 100 {} // Dummy
-      if !ok { fmt.Fprintf(os.Stderr, "No stats entry for captured VM name '%s'\n", m[1]); return; }
+      if !ok { fmt.Fprintf(os.Stderr, "Warning: No stats entry for captured VM name '%s'\n", miname); return; } // m[1]
       
       if agehrs <= float64(mic.KeepMinH)  { mis.Mincnt++; //stats[m[1]].Mincnt++
       } else if agehrs <= float64(mic.KeepMaxH) { mis.Maxcnt++ ; //stats[m[1]].Maxcnt++
@@ -484,7 +497,7 @@ func vmmi_tstats_out (stats map[string]*VMs.MIStat) {
   reparr := make([]*VMs.MIStat, len(stats)) // Prealloc to right size (Use indexes)
   i := 0
   for _, stat := range stats {
-    fmt.Fprintf(os.Stderr, "%s %d %d\n", stat.Hostname, stat.Mincnt, stat.Maxcnt); // 2-statfields text version
+    //if fmt.Fprintf(os.Stderr, "%s %d %d\n", stat.Hostname, stat.Mincnt, stat.Maxcnt); // 2-statfields text version
     reparr[i] = stat // OLD: append(reparr, stat) // append() will append to current pre-alloc'd len of slice !!
     i++
   }
