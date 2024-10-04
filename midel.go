@@ -197,6 +197,11 @@ func miclstat_out(mic MIs.CC, miclstat map[int]int) {
   // Delete items directly using original lnear delarr using channels (underneath).
   // This runs N items *all* the time instead waiting a "chunk" (where items could take different time
 	// to complete individually, waiting for the longest processing one) to complete.
+  // Note: difference in "WorkerLimit" (e.g. 40 vs. 30 can make a big difference in ability to delete w/o errors).
+  // Example error:
+  // Failed to delete MI: myhost-backup-2024-05-26 (googleapi: Error 403: Quota exceeded for quota metric 'Global resource mutation requests' and
+  // limit 'Global resource mutation requests per minute' of service 'compute.googleapis.com' for consumer 'project_number:NNNNNNNNNN'.)
+  // Error Deleting MI: myhost-backup-2024-05-26
   func mimilist_del_chan(mic MIs.CC, delarr []MIMI) {
 	// TODO: Use NewWorkerPool() to have control over config
 	wpool, _ := workerpool.NewWorkerPool(&workerpool.Config{WorkerLimit: mic.WorkerLimit, WorkerTimeoutSeconds: 0}) // NewDefaultWorkerPool()

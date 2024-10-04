@@ -416,11 +416,11 @@ func mi_time_stats() {
   flag.Parse()
   vmc.Project = mic.Project;
   if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
-  fmt.Printf("Proj: %s\n", vmc.Project);
+  fmt.Fprintf(os.Stderr, "Proj: %s\n", vmc.Project);
   allvms := vmc.GetAll()
   if len(allvms) < 1 { fmt.Println("No VMs found"); return; }
   stats := VMs.CreateStatMap(allvms) // Stats map - AT LEAST for tstats op/subcmd
-  if vmc.Debug { fmt.Printf("%v %v", allvms, stats) }
+  if vmc.Debug { fmt.Fprintf(os.Stderr, "%v %v", allvms, stats) }
   //////// MIs ///////////
   rc := mic.Init()
   if rc != 0 {fmt.Printf("MI Client Init() failed: %d (%+v)\n", rc, &mic); return; }
@@ -437,17 +437,17 @@ func mi_time_stats() {
   // cb - Add to stats[]-map
   cb := func(mi * computepb.MachineImage) { // mic MIs.CC
     t, err := mic.CtimeUTC(mi)
-    if err != nil { fmt.Printf("MI C-TS not parsed !"); return; }
+    if err != nil { fmt.Fprintf(os.Stderr, "MI C-TS not parsed !"); return; }
     agehrs := mic.AgeHours2(t)
     //if agehrs > float64(mic.KeepMaxH) { fmt.Printf("Too old\n"); continue; } // Do not discard, BUT ADD to stats
     //if (mic.HostRE != nil) { // No need to check, has been checked much earlier !!!
       m := mic.HostRE.FindStringSubmatch( mi.GetName() )
       // NOTE: HostRE is likely to ONLY match Std. name pattern, so no-match may/will happen for all the ad-hoc backups.
-      if len(m) < 1 { fmt.Printf("No capture items for hostname matching (%s)\n", mi.GetName() ); return; }
-      fmt.Printf("HOSTMatch: %v, MINAME: %s AGE: %f\n", m[1], mi.GetName(), agehrs );
+      if len(m) < 1 { fmt.Fprintf(os.Stderr, "Warning: No capture items for hostname matching (%s)\n", mi.GetName() ); return; }
+      fmt.Fprintf(os.Stderr, "HOSTMatch: %v, MINAME: %s AGE: %f\n", m[1], mi.GetName(), agehrs );
       mis, ok := stats[m[1]] // MI stat. Is this copy or ref to original ? https://golang.cafe/blog/how-to-check-if-a-map-contains-a-key-in-go
       //if mis.Mincnt > 100 {} // Dummy
-      if !ok { fmt.Printf("No stats entry for captured VM name '%s'\n", m[1]); return; }
+      if !ok { fmt.Fprintf(os.Stderr, "No stats entry for captured VM name '%s'\n", m[1]); return; }
       
       if agehrs <= float64(mic.KeepMinH)  { mis.Mincnt++; //stats[m[1]].Mincnt++
       } else if agehrs <= float64(mic.KeepMaxH) { mis.Maxcnt++ ; //stats[m[1]].Maxcnt++
@@ -484,7 +484,7 @@ func vmmi_tstats_out (stats map[string]*VMs.MIStat) {
   reparr := make([]*VMs.MIStat, len(stats)) // Prealloc to right size (Use indexes)
   i := 0
   for _, stat := range stats {
-    fmt.Printf("%s %d %d\n", stat.Hostname, stat.Mincnt, stat.Maxcnt);
+    fmt.Fprintf(os.Stderr, "%s %d %d\n", stat.Hostname, stat.Mincnt, stat.Maxcnt); // 2-statfields text version
     reparr[i] = stat // OLD: append(reparr, stat) // append() will append to current pre-alloc'd len of slice !!
     i++
   }
