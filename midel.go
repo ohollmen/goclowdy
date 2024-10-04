@@ -143,12 +143,15 @@ func mi_del() { // pname string
 
 // MI Classification stats output (mainly for targeting deletion) 
 func miclstat_out(mic MIs.CC, miclstat map[int]int) {
-	// Need: .UTC(). ?
-	fmt.Printf("MI Class (keep/delete reasoning) stats (%s, %s):\n", mic.Project, time.Now().Format("2006-01-02T15:04:05-0700")); // \n%+v\n", miclstat (raw dump)
-	for key, value := range miclstat {
-	  fmt.Println("Class:", verdict[key], "(",key,") :", value)
-	}
+  // Need: .UTC(). ?
+  fmt.Printf("MI Class (keep/delete reasoning) stats (%s, %s):\n", mic.Project, time.Now().Format("2006-01-02T15:04:05-0700")); // \n%+v\n", miclstat (raw dump)
+  clsarr := []int{MIs.KEEP_SAFE, MIs.KEEP_NEW, MIs.KEEP_WD, MIs.KEEP_MD, MIs.KEEP_CUSTOM,    MIs.DEL_1W, MIs.DEL_OLD}
+  //for key, value := range miclstat { // Old map-iter (keys in random order)
+  for i := 0; i < len(clsarr); i++ {
+    key := clsarr[i]
+    fmt.Println("Class:", verdict[key], "(",key,") :", miclstat[key]) // OLD: value
   }
+}
   
    // Serial Delete
   func mimilist_del_serial(mic MIs.CC, delarr []MIMI) {
