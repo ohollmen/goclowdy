@@ -408,14 +408,14 @@ func mi_list2() {
 func mi_time_stats() {
   //ctx := context.Background()
   //////// VMs //////////
-  fmt.Printf("Proj: %s\n", mic.Project);
+  fmt.Fprintf(os.Stderr, "Proj: %s\n", mic.Project);
   vmc := VMs.CC{Project: mic.Project, CredF: mic.CredF} //  
   err := vmc.Init()
   // Note: the flag.Parse() and Project reassign are workaround for inherent state problems for the
   // config -> env env.Set(cfg)-> CL flag.Parse() override seq.
   flag.Parse()
   vmc.Project = mic.Project;
-  if err != nil { fmt.Println("Failed to Init VMC: ", err); return; }
+  if err != nil { fmt.Fprintln(os.Stderr, "Failed to Init VMC: ", err); return; }
   fmt.Fprintf(os.Stderr, "Proj: %s\n", vmc.Project);
   allvms := vmc.GetAll()
   if len(allvms) < 1 { fmt.Println("No VMs found"); return; }
@@ -431,7 +431,7 @@ func mi_time_stats() {
   if mic.HostRE == nil   { fmt.Printf("Warning: No HostRE pattern matcher (RE syntax error ?) !"); return; }
   //totcnt := 0 // TODO: More diverse stats
   secnt := mic.HostRE.NumSubexp()
-  fmt.Printf("Subexpressions: %d\n", secnt);
+  fmt.Fprintf(os.Stderr, "Subexpressions: %d\n", secnt);
   if (secnt < 1) { fmt.Printf("Error: There are no RE captures for VM name - must have min. 1 !"); return; }
   // Gather stats by 1) correlating MI to a VM 2) Seeing if MI classifies as recent (<1week) or older (> 1week) - place this to stats of VM
   // cb - Add to stats[]-map
