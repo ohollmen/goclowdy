@@ -16,6 +16,7 @@ import (
 	b64 "encoding/base64"
 
 	"google.golang.org/api/iam/v1"
+  "time" // time delta / age (key)
 )
 
 type KeyInfo struct {
@@ -45,7 +46,9 @@ type KeyPolicy struct {
 // N/A: See keyinfo_load
 //func get_key_context(acct_p *string, pname_p *string) {}
 
+// List all keys for a user.
 // https://cloud.google.com/iam/docs/keys-list-get#go
+// https://pkg.go.dev/google.golang.org/api/iam/v1#ServiceAccountKey
 func key_list() {
 	ctx := context.Background()
 	iamService, err := iam.NewService(ctx)
@@ -54,18 +57,27 @@ func key_list() {
 	//if ki == nil { return }
 	//var pname string
 	//ki.Project = mic.Project
+  var ki *KeyInfo = nil;
+  
 	akfn := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    //if akfn == "" {fmt.Printf("SA Key file was not passed in env (GOOGLE_APPLICATION_CREDENTIALS)\n"); return}
+  
+  //if akfn == "" {fmt.Printf("SA Key file was not passed in env (GOOGLE_APPLICATION_CREDENTIALS)\n"); return}
 	// TODO: Sample existing:
-	ki := keyinfo_load(akfn)
+	if akfn != "" {
+    ki := keyinfo_load(akfn)
+    if ki == nil {fmt.Printf("SA Key not loaded !\n"); return}
+  }
+  
+  
 	//acct :=
 	//ki.Email = os.Getenv("GCP_SA")
 	//pname =
 	//ki.Project = os.Getenv("GCP_SA_PROJECT") // override
 	//if acct == "" { fmt.Println("No Service account GCP_SA");return}
 	//if pname == "" {fmt.Println("No GCP_SA_PROJECT"); return}
-
-	sapath := fmt.Sprintf("projects/%s/serviceAccounts/%s", ki.Project, ki.Email) // pname, acct
+  sapath := os.Getenv("SA_PATH");
+	if sapath == "" && ki != nil { sapath = fmt.Sprintf("projects/%s/serviceAccounts/%s", ki.Project, ki.Email) } // pname, acct
+  if sapath == "" { fmt.Printf("No SA Path available (for key list search) from ENV (SA_PATH=/projects/${proj}/serviceAccounts/${email}) or keyfile.\n");return }
 	// Expired filter: "validBeforeTime<0d"
 	resp, err := iamService.Projects.ServiceAccounts.Keys.List(sapath).Context(ctx).Do()
 	if err != nil {fmt.Printf("No Keys Found: %v\n", err);return}
@@ -73,8 +85,22 @@ func key_list() {
 	//fmt.Printf("%T\n", resp) // import "reflect" fmt.Println(reflect.TypeOf(tst)) // DEBUG
 	for _, key := range resp.Keys {
 		// TODO: Time dur here
-		fmt.Printf("%T\n", key) // iam.ServiceAccountKey
-		fmt.Printf("%v Exp.: %s\n", path.Base(key.Name), key.ValidBeforeTime)
+		//fmt.Printf("%T\n", key) // *iam.ServiceAccountKey
+    //tm := time.Now()
+    //key.ValidAfterTime = key.ValidAfterTime[0:10]
+    key.ValidAfterTime = strings.Replace(key.ValidAfterTime, "T", " ", 1); // Max 1
+    // NOTE: golang fails to parse ISO time with T between date and time !!!
+    tc, err := time.Parse("2006-01-02 15:04:05Z", key.ValidAfterTime) // T15:04:05
+    if err != nil { fmt.Printf("Failed to parse %s\n", key.ValidAfterTime); continue; }
+    duration := time.Now().Sub(tc) // Age days. Sub() needs time.Time
+    //agedays := fmt.Sprintf("%d", int(duration.Hours()/24))
+    //agedays := int(duration.Hours())
+    //agedays := int(duration.Hours()/24)
+    agedays := duration.Hours()/24 // Float
+    //agedays := duration.String()
+    fmt.Println(tc)
+    // ExtendedStatus
+		fmt.Printf("%v Crea/Exp.: %s..%s (%.1f d.), Disa: %v, Orig: %s, MngdBy:%s\n", path.Base(key.Name), key.ValidAfterTime, key.ValidBeforeTime, agedays, key.Disabled, key.KeyOrigin, key.KeyType)
 	}
 	// Also: SignJwtRequest, but: https://cloud.google.com/iam/docs/migrating-to-credentials-api
 	auth_token()
@@ -96,6 +122,8 @@ func auth_token() string {
 
 // Load JWT Key info from a file given in akfn (auth key filename).
 func keyinfo_load(akfn string) *KeyInfo {
+  errbase := "keyinfo_load: SA Key not loaded."
+  if akfn == "" { fmt.Printf("%s. Filename not passed (for loading the key)\n", errbase); return nil }
   _, err := os.Stat(akfn)
   if err != nil {fmt.Printf("SA Key file '%s' could not be found: %v\n", akfn, err); return nil}
   dat, err := os.ReadFile(akfn)

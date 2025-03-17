@@ -68,6 +68,11 @@ import (
   // "cloud.google.com/go/storage" // GCS, See: https://cloud.google.com/storage/docs/samples/storage-upload-file#storage_upload_file-go
   //"path/filepath" // Win + UNIX
   "path" // "/" based paths (std. lib)
+  // Required by WalkDir
+  //"io/fs" // for DirEntry present in WalkDir cb signatures
+  //"path/filepath" // Walk / WalkDir and  abs-to-rel by Rel()
+  //"bytes" // Fors splitting bytearrays bytes.Split()
+  //"path/filepath" //
 )
 
 var verdict = [...]string{"KEEP to be safe", "KEEP NEW/RECENT (< KeepMinH)", "KEEP (MID-TERM, WEEKLY)", "DELETE (MID-TERM)", "DELETE OLD (> KeepMaxH)", "KEEP-NON-STD-NAME", "KEEP (MID-TERM, MONTHLY)"}
@@ -109,10 +114,11 @@ var scomms = []SubComm{
   {"milist",    "List Machine Images", mi_list2},
   {"vmbackup",  "Backup VMs from a single project (Use overriding --project, --filter (by VM name) and --suffix (additional suffix) as needed)", vm_backup},
   {"projlist",  "List projects (in org, Use --ansible to output as ansible inventory, use --filter to do label filtering)", proj_list}, // labelfilter
-  {"projsvmbackup", "Backup VMs from Org (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
+  {"projsvmbackup", "Backup VMs from Org (Use --filter to perform labels based filtering, --suffix at add custom suffix)", projsvmbackup}, // labelfilter
   {"projsvmlist", "List VMs from Org along their project (Use --filter to perform labels based filtering)", projsvmbackup}, // labelfilter
   {"orgtree",   "Dump OrgTree as JSON", orgtree_dump},
   {"projvmstop", "Stop VMs in a Project (Use --project and optional --filter)", proj_shutdown},
+  //{"grep","", file_filter},
   //{"","",},
   //{"","",},//{"","",},
 
@@ -126,6 +132,7 @@ func usage(msg string) {
   if msg != "" { fmt.Printf("Usage: %s\n", msg); }
   fmt.Println("Pass one of subcommands: "); // +subcmds
   for _, sc := range scomms {
+    if sc.name == "" { continue; }
     fmt.Printf("- %s - %s\n", sc.cmd, sc.name)
   }
 }
@@ -149,6 +156,7 @@ var Suffix = ""
 var Prefix = "" // for e.g. projlist
 var Ansible = false;
 var Delok = false;
+var FilterRE regexp.Regexp;
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
 func args_bind() { // clpara map[string]string
@@ -639,3 +647,111 @@ func proj_shutdown() {
     vmc.Stop(it)
   }
 }
+
+
+///////////// Tentative - domain specific dir tree filtering / listng //////////////////////////////
+// Needs: import (
+// "io/fs" // for DirEntry present in WalkDir cb signatures
+// "path/filepath" // Walk / WalkDir and  abs-to-rel by Rel()
+// "bytes" // Fors splitting bytearrays bytes.Split()
+//)
+/*
+// Match individual lines in bytearray (must be split inside)
+type LineMatch struct { lineno int; mline []byte; linecnt int};
+func linematch(cont []byte) []LineMatch { // [][]byte - cannot capture line number
+  if cont == nil { return nil; }
+  //mlines := [][]byte{};
+  matches := []LineMatch{};
+  //if lines == nil {}
+  lines := bytes.Split(cont, []byte("\n"))
+  for idx, l := range lines { // idx
+    //fmt.Printf("%s\n", string(l))
+    // Match
+    matched := FilterRE.Match(l)
+    if (matched) {
+      //fmt.Printf("Line %d: %s\n", idx, l);
+      //mlines = append(mlines, l);
+      matches = append(matches, LineMatch{lineno: idx+1, mline: l, linecnt: len(lines)});
+    }
+  }
+  if len(matches) < 1 { return nil; }
+  return matches
+}
+
+// Note: Alternative path/filepath.WalkFunc would be called w. FileInfo
+// https://pkg.go.dev/io/fs#DirEntry
+func procfsnode_de(path string, d fs.DirEntry, err error) error {
+  // How to prevent diving into dir (e.g. by dir name)
+  if d.IsDir() {
+    //if excludes[ d.Name() ] { return  filepath.SkipDir; }
+    if d.Name() == ".git" { return  filepath.SkipDir; }
+    //fmt.Printf("Directory: %s (Name: %s)\n", path, d.Name());
+    return nil;
+  }
+  //if Debug { fmt.Printf("File: %s (Name: %s)\n", path, d.Name()); }
+  // 
+  if d.Name() != "index.html" { return nil; } // e.g. package.json, index.html, terragrunt.hcl
+  // if strings.HasPrefix(d.Name(), Prefix) { fmt.Printf("Has prefix %s\n", ); return nil; }
+  // https://pkg.go.dev/io/fs#FileInfo
+  fi, err := d.Info()
+  if err != nil { fmt.Printf("No file info for %s\n", d.Name()); return nil; }
+  if fi == nil  { return nil; }
+  cont, err := os.ReadFile(path)
+  if err != nil { fmt.Printf("Error reading file %s\n", path); return nil; }
+  if len(cont) == 0 { fmt.Printf("Empty file: %s\n", path); return nil; }
+  relpath, err := filepath.Rel(pathroot, path)
+  if err != nil { relpath = path; }
+  //matched, _ := regexp.Match(Filter, cont) // MatchString()
+  //matched := FilterRE.Match(cont) // MatchString() for str
+  //if (matched) { fmt.Printf("Match in %s !!!\n", path); }
+  lines := bytes.Split(cont, []byte("\n"))
+  matches := linematch(cont);
+  
+  
+  //if err != nil { fmt.Printf("Error matching mod."); return nil; }
+  //if matched { fmt.Printf("Matched: `%s`\n", matched); }
+  // mre := *regexp.MustCompile("([a-z]+-[\\w-]+)");
+  // new String(bytes, StandardCharsets.UTF_8)
+  // p = make(map[string]string); for i, name := range compRegEx.SubexpNames() { p[name] = match[i] } (for i > 0 && i <= len(match) )
+  caps := ModRe.FindSubmatch(cont) // NA: FindSubmatch Use: FindStringSubmatch
+  signifier := []byte("NONE");
+  //if err != nil    { fmt.Printf("Error searching for mod."); return nil; }
+  if len(caps) > 0 { signifier = caps[1]  } // fmt.Printf("No mod. fnd in %s\n", path); return nil;
+  if matches == nil {  return nil; } // fmt.Printf("  - No match in %s !\n", relpath);
+  fmt.Printf("%s (%d l.) => module: %s\n", relpath, len(lines), signifier); // caps[1]
+  if NoOut { return nil; } // No match output
+  if matches != nil {
+    for _, m := range matches { fmt.Printf("%d: %s\n", m.lineno, m.mline); }
+  }
+  return nil;
+}
+
+var ModRe regexp.Regexp; // Signifier
+var pathroot string = ".";
+var NoOut = false;
+// var ExcludeMap =  make(map[string]bool);
+// Grep from a tree
+// Use global arg --filter to filter files
+// Get path from flag arg 0
+// https://pkg.go.dev/path/filepath
+// https://stackoverflow.com/questions/30483652/how-to-get-capturing-group-functionality-in-go-regular-expressions
+// TODO: - Option for no matches (take from grep)
+func file_filter() {
+  flag.BoolVar(&NoOut,     "no-out", false, "No match output (with line number and match).")
+  flag.Parse()
+  // err = json.Unmarshal(cont, &dsgrepconf) // Config ?
+  if Filter == "" { fmt.Printf("Must pass --filter to do grep-filtering.\n"); return; } // flag.Arg(0) ?
+  FilterRE = *regexp.MustCompile(Filter) // Always custom filter from CLI
+  //if (DSGREP_MODRE == "") { fmt.Printf("No module re set (e.g. in Env. !"); return; }
+  ModRe = *regexp.MustCompile("([a-z]+-[\\w-]+)") // TODO: Should come From cfg
+  //if ModRE
+  //pathroot := "."; // now mod-global
+  // flag.Arg(0) &&
+  if  (flag.Arg(0) != "") { pathroot = flag.Arg(0); } // Arg(1) like grep ?
+  // https://pkg.go.dev/io/fs#WalkDirFunc
+  filepath.WalkDir(pathroot, procfsnode_de);
+  // 
+}
+*/
+// Role-diff 2 roles (in few different ways) in a project context
+//func iamrolecmp () {}
