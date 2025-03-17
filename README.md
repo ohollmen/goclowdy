@@ -16,6 +16,21 @@ Set environment variables for project and JSON credentials:
 - GCP_PROJECT - The GCP Project from where the GCP artifacts are going to be accessed
 - GOOGLE_APPLICATION_CREDENTIALS - The JSON credentials for accessing CGP org/project.
 
+Authenticating to GCP with the application
+```
+# Set env variable (libraries will honor this)
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/gcpsakey.json
+# Activate (non-expired) account key (may also pass account as first non-kw arg, but will also parse/discover user from within key file)
+# May also pass --project
+gcloud auth activate-service-account --key-file /path/to/gcpsakey.json
+# ADC - Application Default Credentials
+# Consider also
+# - No Browser (or on another machine than gcloud): --no-browser or --no-launch-browser (legacy alias)
+# - Create: gcloud iam service-accounts keys create key.json --iam-account=my-account@my-project.iam.gserviceaccount.com
+# - Path Location: ~/.config/gcloud/application_default_credentials.json (Mac, Linux)
+# Ref: https://stackoverflow.com/questions/53306131/difference-between-gcloud-auth-application-default-login-and-gcloud-auth-logi
+gcloud auth application-default login
+```
 ## Building Main Executable
 
 This should build the main executable by name 'goclowdy':
