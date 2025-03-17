@@ -20,7 +20,8 @@ After Install (e.g. on MacOS) the `staticcheck` is available in `~/go/bin/static
 # Running
 
 Note: it seems binary name for utility has changed to staticcheck.
-
+There seems to be a lot of golang runtime errors running analysis (no
+any analysis output either).
 ```
 # Check version
 golangci-lint --version
