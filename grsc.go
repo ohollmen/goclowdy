@@ -157,6 +157,7 @@ var Prefix = "" // for e.g. projlist
 var Ansible = false;
 var Delok = false;
 var FilterRE regexp.Regexp;
+var SAEmail = ""
 // OLD-TODO: Loop trough arg-keys, populate map w. ""-values.
 // TODO: Possibly do tiny bit of reflection here to detect type ?
 func args_bind() { // clpara map[string]string
@@ -173,6 +174,7 @@ func args_bind() { // clpara map[string]string
   flag.StringVar(&Prefix,      "prefix", "", "Prefix (string) to use for projects listing (e.g. --prefix '    - ' for YAML list)")
   flag.BoolVar(&Ansible,      "ansible", false, "Create projectlist as ansible inventory.")
   flag.BoolVar(&Delok,        "delok", false, "Indicate that deletion is okay (e.g. MI).")
+  flag.StringVar(&SAEmail,     "sa", "", "Service Account (subject to operation)")
   //flag.IntVar(p *int, name string, value int, usage string)
 
   // This does not work based on Go dangling pointer-policies
